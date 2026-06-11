@@ -1,14 +1,13 @@
 using UnityEngine;
 using WorkerEnum;
 
-[RequireComponent(typeof(WorkerActionSet))]
 public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<WorkerActionContext, WorkerActionPlan>
 {
     [SerializeField] private WorkerActionSet actionSet;
 
     private void Awake()
     {
-        if (actionSet == null)
+        if (!actionSet)
             TryGetComponent(out actionSet);
     }
 
@@ -29,6 +28,14 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
             return TryCreatePlan(context, ActionType.Rest, out plan);
 
         return TryCreatePlan(context, ActionType.Work, out plan);
+    }
+
+    public bool ReturnAction(IAction action)
+    {
+        if (!actionSet)
+            return false;
+
+        return actionSet.ReturnAction(action);
     }
 
     private bool TryCreatePlan(
@@ -61,7 +68,7 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
     {
         destination = default;
 
-        if (context.DestinationProvider == null)
+        if (!context.DestinationProvider)
             return false;
 
         if (!context.DestinationProvider.TryGetDestinationPosition(actionType, out destination))

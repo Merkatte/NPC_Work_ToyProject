@@ -26,6 +26,11 @@ public sealed class WorkerActionPlan
         return new WorkerActionPlan(actions);
     }
 
+    public void RemoveRentedAction(IAction action)
+    {
+        _rentedActions.Remove(action);
+    }
+
     public bool TryMoveNextAction()
     {
         if (_actions.Count <= 0)

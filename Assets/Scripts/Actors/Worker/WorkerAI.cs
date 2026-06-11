@@ -5,7 +5,6 @@ using WorkerEnum;
 public class WorkerAI : MonoBehaviour
 {
     [SerializeField] private MonoBehaviour actionSelectorSource;
-    [SerializeField] private WorkerActionSet actionSet;
     [SerializeField] private DestinationProvider destinationProvider;
     [SerializeField] private WorkerMovementStats movementStats;
     [SerializeField] private TickManager tickManager;
@@ -26,11 +25,8 @@ public class WorkerAI : MonoBehaviour
     //Temporary Method. will be erased when factory method call Init.
     private void Awake()
     {
-        if (destinationProvider == null)
+        if (!destinationProvider)
             TryGetComponent(out destinationProvider);
-
-        if (actionSet == null)
-            TryGetComponent(out actionSet);
 
         if (!movementStats)
             TryGetComponent(out movementStats);
@@ -70,10 +66,10 @@ public class WorkerAI : MonoBehaviour
     public bool HasCurrentAction => currentPlan?.CurrentAction != null;
 
     // WorkerAI only runs actions; selection and construction live outside this class.
-    public void SetAction(IAction action)
-    {
-        SetPlan(WorkerActionPlan.Create(action));
-    }
+    // public void SetAction(IAction action)
+    // {
+    //     SetPlan(WorkerActionPlan.Create(action));
+    // }
 
     public void SetPlan(WorkerActionPlan plan)
     {
@@ -110,6 +106,8 @@ public class WorkerAI : MonoBehaviour
 
         if (state == ActionState.Success)
         {
+            ReturnAction(currentPlan, currentPlan.CurrentAction);
+
             if (currentPlan.TryMoveNextAction())
             {
                 currentActionStarted = false;
@@ -127,31 +125,52 @@ public class WorkerAI : MonoBehaviour
 
     private void ReturnPlanActions(WorkerActionPlan plan)
     {
-        if (plan == null || !actionSet)
+        if (plan == null || actionSelector == null)
             return;
 
-        for (int i = 0; i < plan.RentedActions.Count; i++)
-            actionSet.ReturnAction(plan.RentedActions[i]);
+        while (plan.RentedActions.Count > 0)
+            ReturnAction(plan, plan.RentedActions[0]);
+    }
+
+    private void ReturnAction(WorkerActionPlan plan, IAction action)
+    {
+        if (action == null || actionSelector == null)
+            return;
+
+        actionSelector.ReturnAction(action);
+        plan?.RemoveRentedAction(action);
     }
 
     private IActionSelector<WorkerActionContext, WorkerActionPlan> ResolveActionSelector()
     {
-        if (actionSelectorSource != null)
+        if (actionSelectorSource)
         {
             if (actionSelectorSource is IActionSelector<WorkerActionContext, WorkerActionPlan> selector)
                 return selector;
 
-            Debug.LogWarning($"{actionSelectorSource.name} does not implement {nameof(IActionSelector<WorkerActionContext, WorkerActionPlan>)}.", this);
+            selector = FindActionSelector(actionSelectorSource.GetComponents<MonoBehaviour>());
+            if (selector != null)
+                return selector;
+
+            Debug.LogWarning($"{actionSelectorSource.name} does not have an {nameof(IActionSelector<WorkerActionContext, WorkerActionPlan>)} component.", this);
         }
 
-        MonoBehaviour[] components = GetComponents<MonoBehaviour>();
+        IActionSelector<WorkerActionContext, WorkerActionPlan> fallbackSelector = FindActionSelector(GetComponents<MonoBehaviour>());
+        if (fallbackSelector != null)
+            return fallbackSelector;
+
+        Debug.LogWarning($"{nameof(WorkerAI)} could not find an {nameof(IActionSelector<WorkerActionContext, WorkerActionPlan>)}.", this);
+        return null;
+    }
+
+    private IActionSelector<WorkerActionContext, WorkerActionPlan> FindActionSelector(MonoBehaviour[] components)
+    {
         for (int i = 0; i < components.Length; i++)
         {
             if (components[i] is IActionSelector<WorkerActionContext, WorkerActionPlan> selector)
                 return selector;
         }
 
-        Debug.LogWarning($"{nameof(WorkerAI)} could not find an {nameof(IActionSelector<WorkerActionContext, WorkerActionPlan>)}.", this);
         return null;
     }
 }
