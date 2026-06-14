@@ -1,41 +1,83 @@
 using UnityEngine;
+using UnityEngine.Serialization;
 using WorkerEnum;
 
-public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<WorkerActionContext, WorkerActionPlan>
+public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<WorkerActionContext, WorkerActionPlan>, IWorkerActionSelectorSetup
 {
-    [SerializeField] private WorkerActionSet actionSet;
+    private const float CriticalThreshold = 70f;
+    private const float PrepareThreshold = 60f;
+
+    [FormerlySerializedAs("actionSet")]
+    [SerializeField] private WorkerActionSet _actionSet;
+
+    [FormerlySerializedAs("destinationProvider")]
+    [SerializeField] private DestinationProvider _destinationProvider;
 
     private void Awake()
     {
-        if (!actionSet)
-            TryGetComponent(out actionSet);
+        if (!_actionSet)
+            TryGetComponent(out _actionSet);
+
+        if (!_destinationProvider)
+            TryGetComponent(out _destinationProvider);
+    }
+
+    public void Init(WorkerActionSet actionSet)
+    {
+        _actionSet = actionSet;
+    }
+
+    public void Init(DestinationProvider destinationProvider)
+    {
+        _destinationProvider = destinationProvider;
     }
 
     public bool TrySelectAction(WorkerActionContext context, out WorkerActionPlan plan)
     {
         plan = null;
 
-        if (!actionSet)
+        if (!_actionSet)
             return false;
 
-        if (context.Stats.Thirst >= 70f)
-            return TryCreatePlan(context, ActionType.Drink, out plan);
+        if (TryGetNeededActionType(context, CriticalThreshold, out ActionType actionType))
+            return TryCreatePlan(context, actionType, out plan);
 
-        if (context.Stats.Hunger >= 70f)
-            return TryCreatePlan(context, ActionType.Eat, out plan);
-
-        if (context.Stats.Fatigue >= 70f)
-            return TryCreatePlan(context, ActionType.Rest, out plan);
+        if (TryGetNeededActionType(context, PrepareThreshold, out actionType))
+            return TryCreatePlan(context, actionType, out plan);
 
         return TryCreatePlan(context, ActionType.Work, out plan);
     }
 
+    private bool TryGetNeededActionType(WorkerActionContext context, float threshold, out ActionType actionType)
+    {
+        if (context.Stats.Thirst >= threshold)
+        {
+            actionType = ActionType.Drink;
+            return true;
+        }
+
+        if (context.Stats.Hunger >= threshold)
+        {
+            actionType = ActionType.Eat;
+            return true;
+        }
+
+        if (context.Stats.Fatigue >= threshold)
+        {
+            actionType = ActionType.Rest;
+            return true;
+        }
+
+        actionType = default;
+        return false;
+    }
+
     public bool ReturnAction(IAction action)
     {
-        if (!actionSet)
+        if (!_actionSet)
             return false;
 
-        return actionSet.ReturnAction(action);
+        return _actionSet.ReturnAction(action);
     }
 
     private bool TryCreatePlan(
@@ -45,14 +87,14 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
     {
         plan = null;
 
-        if (!actionSet.TryGetAction(actionType, out IAction action))
+        if (!_actionSet.TryGetAction(actionType, out IAction action))
             return false;
 
         if (TryGetMoveDestination(context, actionType, out Vector3 destination))
         {
-            if (!actionSet.TryGetAction(ActionType.Move, destination, out IAction moveAction))
+            if (!_actionSet.TryGetAction(ActionType.Move, destination, out IAction moveAction))
             {
-                actionSet.ReturnAction(action);
+                _actionSet.ReturnAction(action);
                 return false;
             }
 
@@ -68,10 +110,10 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
     {
         destination = default;
 
-        if (!context.DestinationProvider)
+        if (!_destinationProvider)
             return false;
 
-        if (!context.DestinationProvider.TryGetDestinationPosition(actionType, out destination))
+        if (!_destinationProvider.TryGetDestinationPosition(actionType, out destination))
             return false;
 
         Vector3 current = context.Transform.position;

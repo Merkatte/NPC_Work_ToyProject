@@ -10,8 +10,8 @@ The current project is a Unity 2D worker/NPC behavior prototype. The core design
 - action lifecycle: `WorkerAI`
 - queued action runtime flow: `WorkerActionPlan`
 - worker capabilities: `WorkerActionContext`
+- scene destination lookup: providers, consumed by selectors
 - low-level movement/stat logic: worker capability classes
-- scene destination lookup: providers
 
 ## File Structure
 
@@ -28,19 +28,23 @@ Assets/
     Actors/
       Worker/
         WorkerAI.cs
-        WorkerActionContext.cs
+        WorkerAIManager.cs
         WorkerActionPlan.cs
         WorkerActionSet.cs
+        WorkerCombatActionSelector.cs
         WorkerDefaultActionSelector.cs
-        WorkerMovementStats.cs
-        WorkerMover.cs
-        WorkerStats.cs
+        WorkerSelectorType.cs
         Actions/
           DrinkAction.cs
           EatAction.cs
           MoveAction.cs
           RestAction.cs
           WorkAction.cs
+        Context/
+          WorkerActionContext.cs
+          WorkerMovementStats.cs
+          WorkerMover.cs
+          WorkerStats.cs
 
     Enum/
       ActionState.cs
@@ -143,6 +147,26 @@ When autonomous movement is planned as `MoveAction -> EatAction`, the selector a
 
 ## Script Roles
 
+### WorkerAIManager
+
+File: `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
+
+Role:
+
+- Instantiates `WorkerAI` prefabs.
+- Resolves prefab-side worker dependencies such as `WorkerMovementStats` and `WorkerActionSet`.
+- Owns selector templates and chooses which selector type to inject.
+- Creates a worker-specific selector instance from the selected template.
+- Creates `WorkerStats`, `WorkerMover`, and `WorkerActionContext`.
+- Injects the runtime context and selector into `WorkerAI`.
+- Tracks spawned worker instances.
+
+Should not:
+
+- Decide worker behavior priorities.
+- Execute actions or tick action plans.
+- Mutate worker stats as behavior.
+
 ### WorkerAI
 
 File: `Assets/Scripts/Actors/Worker/WorkerAI.cs`
@@ -150,9 +174,7 @@ File: `Assets/Scripts/Actors/Worker/WorkerAI.cs`
 Role:
 
 - Owns the current `WorkerActionPlan`.
-- Creates the worker runtime context in the current temporary setup.
-- Resolves `WorkerMovementStats` from the GameObject and passes it to movement/runtime context.
-- Resolves the active selector.
+- Receives `WorkerActionContext` and the active selector through `Init`.
 - Requests a plan when no action is running.
 - Runs `Start`, `Tick`, and `Cancel` on the active action.
 - Advances to the next queued action when the current action succeeds.
@@ -164,20 +186,17 @@ Should not:
 - Mutate stats directly as behavior.
 - Implement movement, eating, resting, animation, or UI behavior.
 - Hardcode destination selection logic.
-
-Current note:
-
-- `Awake()` is marked temporary. The comments indicate this will eventually move to a factory or manager.
-- `statsTickType` is currently unused except for planned tick-manager integration.
+- Instantiate itself or construct its own runtime context.
+- Resolve selector dependencies.
 
 ### WorkerActionContext
 
-File: `Assets/Scripts/Actors/Worker/WorkerActionContext.cs`
+File: `Assets/Scripts/Actors/Worker/Context/WorkerActionContext.cs`
 
 Role:
 
 - Provides actions with access to worker capabilities and state.
-- Contains `Transform`, `WorkerMover`, `WorkerStats`, `WorkerMovementStats`, `DestinationProvider`, and the current `WorkerActionPlan`.
+- Contains `Transform`, `WorkerMover`, `WorkerStats`, `WorkerMovementStats`, and the current `WorkerActionPlan`.
 
 Should not:
 
@@ -219,6 +238,7 @@ Role:
 
 - Default worker "brain".
 - Reads `WorkerStats`.
+- Uses `DestinationProvider` as an explicit selector dependency.
 - Chooses the next intended behavior.
 - Builds a `WorkerActionPlan`.
 - Queues movement before the selected behavior if the worker is not already at the required destination.
@@ -419,10 +439,15 @@ Preferred dependency direction:
 ```text
 WorkerAI
   -> IActionSelector<WorkerActionContext, WorkerActionPlan>
-  -> WorkerActionPlan
+
+WorkerDefaultActionSelector
+  -> WorkerActionSet
+  -> DestinationProvider
+
+WorkerActionPlan
   -> IAction
   -> WorkerActionContext
-  -> Worker capabilities/providers
+  -> Worker capabilities
 ```
 
 The intent is that higher-level orchestration depends on role contracts and context, while low-level systems do not depend back on the decision layer.
@@ -430,6 +455,12 @@ The intent is that higher-level orchestration depends on role contracts and cont
 ### Runtime Autonomous Flow
 
 ```text
+WorkerAIManager
+  instantiates WorkerAI prefab
+  creates WorkerStats / WorkerMover / WorkerActionContext
+  creates a worker-specific IActionSelector from its selector entries
+  calls WorkerAI.Init(context, selector)
+
 WorkerAI
   has WorkerActionContext
   has current WorkerActionPlan
@@ -439,7 +470,7 @@ WorkerAI
 WorkerDefaultActionSelector
   reads WorkerStats through context
   uses WorkerActionSet to get IAction
-  uses DestinationProvider through context to decide if movement is needed
+  uses its DestinationProvider dependency to decide if movement is needed
   returns WorkerActionPlan containing one or more queued actions
 
 WorkerAI
@@ -511,7 +542,8 @@ Do not put new behavior directly in `WorkerAI`.
 
 1. Create a class implementing `IActionSelector<WorkerActionContext, WorkerActionPlan>`.
 2. Keep dependencies explicit through serialized fields, context, or setup methods.
-3. Assign the new selector to `WorkerAI.actionSelectorSource` or place it on the same GameObject so `WorkerAI` can resolve it.
+3. Add a `WorkerSelectorType` value if the selector needs a new role/category.
+4. Add the selector template to `WorkerAIManager`'s selector entries.
 
 Do not modify `WorkerAI` just to change behavior priority.
 
@@ -539,7 +571,6 @@ Do not spread movement math into selectors or unrelated actions.
 ## Known Design Notes
 
 - Some current code still uses older style patterns, such as explicit `== null` checks and mixed private field naming. New edits should follow `CodeConvention.md`.
-- `WorkerAI.Awake()` currently creates some worker runtime objects directly, such as `WorkerStats` and `WorkerMover`. The comments indicate this should later move to a factory or manager.
 - `Assembly-CSharp.csproj` may be regenerated by Unity. If new scripts are added and command-line `dotnet build` cannot see them, Unity regeneration or project-file update may be needed.
 - `DestinationProvider` currently stores `GameObject` references. If only position is needed, `Transform` may be cleaner later.
 - `DestinationType.cs` still exists, but current destination lookup is based on `ActionType`.

@@ -7,22 +7,19 @@ public sealed class WorkerActionContext
     public WorkerMover Mover { get; }
     public WorkerStats Stats { get; }
     public WorkerMovementStats MovementStats { get; }
-    public DestinationProvider DestinationProvider { get; }
     public WorkerActionPlan Plan { get; private set; }
 
     public WorkerActionContext(
         Transform transform,
         WorkerMover mover,
         WorkerStats stats,
-        WorkerMovementStats movementStats,
-        DestinationProvider destinationProvider)
+        WorkerMovementStats movementStats)
     {
         //Owner = owner;
         Transform = transform;
         Mover = mover;
         Stats = stats;
         MovementStats = movementStats;
-        DestinationProvider = destinationProvider;
     }
 
     public void SetPlan(WorkerActionPlan plan)
