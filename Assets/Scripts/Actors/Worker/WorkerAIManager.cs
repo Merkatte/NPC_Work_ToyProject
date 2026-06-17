@@ -91,13 +91,7 @@ public class WorkerAIManager : MonoBehaviour
             return false;
         }
 
-        if (!worker.TryGetComponent(out WorkerActionSet actionSet))
-        {
-            Debug.LogWarning($"{nameof(WorkerAI)} prefab requires {nameof(WorkerActionSet)}.", this);
-            return false;
-        }
-
-        if (!TryCreateSelector(_initialSelectorType, worker.transform, actionSet, out IActionSelector<WorkerActionContext, WorkerActionPlan> actionSelector))
+        if (!TryCreateSelector(_initialSelectorType, worker.transform, out IActionSelector<WorkerActionContext, WorkerActionPlan> actionSelector))
         {
             Debug.LogWarning($"{nameof(WorkerAIManager)} could not create a {_initialSelectorType} selector.", this);
             return false;
@@ -117,7 +111,6 @@ public class WorkerAIManager : MonoBehaviour
     private bool TryCreateSelector(
         WorkerSelectorType selectorType,
         Transform parent,
-        WorkerActionSet actionSet,
         out IActionSelector<WorkerActionContext, WorkerActionPlan> selector)
     {
         selector = null;
@@ -136,7 +129,15 @@ public class WorkerAIManager : MonoBehaviour
             selectorInstance.name = $"{selectorType}Selector";
 
             if (selectorInstance is IWorkerActionSelectorSetup setup)
+            {
+                if (!TryGetSelectorActionSet(selectorInstance, out WorkerActionSet actionSet))
+                {
+                    Destroy(selectorInstance.gameObject);
+                    return false;
+                }
+
                 setup.Init(actionSet);
+            }
 
             if (selectorInstance is IActionSelector<WorkerActionContext, WorkerActionPlan> actionSelector)
             {
@@ -148,6 +149,15 @@ public class WorkerAIManager : MonoBehaviour
             return false;
         }
 
+        return false;
+    }
+
+    private bool TryGetSelectorActionSet(MonoBehaviour selectorInstance, out WorkerActionSet actionSet)
+    {
+        if (selectorInstance.TryGetComponent(out actionSet))
+            return true;
+
+        Debug.LogWarning($"{selectorInstance.name} requires {nameof(WorkerActionSet)} on the selector template.", this);
         return false;
     }
 }

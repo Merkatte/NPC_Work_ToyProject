@@ -869,6 +869,10 @@ MonoBehaviour:
     _hunger: 0
     _thirst: 0
     _fatigue: 0
+  _initialSelectorType: 0
+  _selectorEntries:
+  - _selectorType: 0
+    _selectorSource: {fileID: 568873992}
 --- !u!1 &1235953371
 GameObject:
   m_ObjectHideFlags: 0

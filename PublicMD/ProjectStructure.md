@@ -10,6 +10,7 @@ The current project is a Unity 2D worker/NPC behavior prototype. The core design
 - action lifecycle: `WorkerAI`
 - queued action runtime flow: `WorkerActionPlan`
 - worker capabilities: `WorkerActionContext`
+- worker action result tuning: `WorkerActionResultStatData`
 - scene destination lookup: providers, consumed by selectors
 - low-level movement/stat logic: worker capability classes
 
@@ -45,6 +46,10 @@ Assets/
           WorkerMovementStats.cs
           WorkerMover.cs
           WorkerStats.cs
+        Data/
+          WorkerActionResultStatData.cs
+          WorkerActionResultStatEntry.cs
+          WorkerStatDelta.cs
 
     Enum/
       ActionState.cs
@@ -72,6 +77,9 @@ Assets/
 
 `Assets/Scripts/Actors/Worker/Actions`
 : Worker action implementations. New worker behaviors should normally appear here as new `IAction` implementations.
+
+`Assets/Scripts/Actors/Worker/Data`
+: Worker-owned tuning/data assets and serializable value types. Action result duration and stat delta data lives here instead of inside `WorkerAI` or action implementations.
 
 `Assets/Scripts/Interface`
 : Shared role contracts used to reduce dependency on concrete implementations.
@@ -123,6 +131,8 @@ Movement speed and stopping distance are not plan data. They belong to worker mo
 
 `WorkerActionSet` owns one action instance per registered `ActionType` for a worker.
 
+It also owns the reference to `WorkerActionResultStatData` and injects the matching `WorkerActionResultStatEntry` when creating stat-result actions.
+
 Currently registered actions:
 
 - `RestAction`
@@ -132,6 +142,8 @@ Currently registered actions:
 - `MoveAction`
 
 Because actions may be reused, every action with runtime state must reset that state in `Start()`. For example, timer-based actions reset their timers in `Start()`.
+
+Stat-result actions should not hardcode duration, cost, or reward values. They read their injected result entry and apply its `WorkerStatDelta` to `WorkerStats` on completion.
 
 ### Destination-Based Movement
 
@@ -154,9 +166,10 @@ File: `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
 Role:
 
 - Instantiates `WorkerAI` prefabs.
-- Resolves prefab-side worker dependencies such as `WorkerMovementStats` and `WorkerActionSet`.
+- Resolves prefab-side worker dependencies such as `WorkerMovementStats`.
 - Owns selector templates and chooses which selector type to inject.
 - Creates a worker-specific selector instance from the selected template.
+- Resolves the selector-side `WorkerActionSet` from the selector template instance and injects it into selectors that require setup.
 - Creates `WorkerStats`, `WorkerMover`, and `WorkerActionContext`.
 - Injects the runtime context and selector into `WorkerAI`.
 - Tracks spawned worker instances.
@@ -166,6 +179,7 @@ Should not:
 - Decide worker behavior priorities.
 - Execute actions or tick action plans.
 - Mutate worker stats as behavior.
+- Require worker prefabs to own `WorkerActionSet`.
 
 ### WorkerAI
 
@@ -239,6 +253,7 @@ Role:
 - Default worker "brain".
 - Reads `WorkerStats`.
 - Uses `DestinationProvider` as an explicit selector dependency.
+- Uses `WorkerActionSet` for both action rental and action result stat data lookup.
 - Chooses the next intended behavior.
 - Builds a `WorkerActionPlan`.
 - Queues movement before the selected behavior if the worker is not already at the required destination.
@@ -255,6 +270,7 @@ Should not:
 - Execute actions directly.
 - Move transforms.
 - Mutate stats.
+- Read concrete action implementations for cost/reward values.
 - Play animation or UI.
 
 Replaceability:
@@ -270,11 +286,15 @@ Role:
 
 - Registry from `ActionType` to `IAction`.
 - Owns action instances for a worker.
+- Owns the configured `WorkerActionResultStatData` reference.
+- Provides action result stat entries to selectors through `TryGetResultStatEntry`.
+- Injects result stat entries into timer-based stat actions when creating them.
 
 Current limitation:
 
 - Actions are registered manually in `Awake()`.
 - If a new action is added, it must be registered here unless registration is later moved to data-driven setup.
+- New stat-result actions need a matching `WorkerActionResultStatData` entry.
 
 ### IAction
 
@@ -331,15 +351,42 @@ Role:
 - Timer-based stat actions.
 - Reset timer in `Start()`.
 - Return `Running` while timer remains.
-- Mutate `WorkerStats` on completion.
+- Apply their injected `WorkerStatDelta` to `WorkerStats` on completion.
 - Return `Success` after applying effect.
 
-Current stat effects:
+Current stat effects live in `WorkerActionResultStatData`:
 
 - Eat reduces hunger.
 - Drink reduces thirst.
 - Rest reduces fatigue.
-- Work increases hunger, thirst, and fatigue through `WorkerStats.Work(...)`.
+- Work increases hunger, thirst, and fatigue.
+
+They should not:
+
+- Hardcode duration, cost, or reward numbers.
+- Reference selector logic or decide whether the worker should continue working.
+- Ask `WorkerActionResultStatData` directly during `Tick()`.
+
+### WorkerActionResultStatData
+
+Files:
+
+- `Assets/Scripts/Actors/Worker/Data/WorkerActionResultStatData.cs`
+- `Assets/Scripts/Actors/Worker/Data/WorkerActionResultStatEntry.cs`
+- `Assets/Scripts/Actors/Worker/Data/WorkerStatDelta.cs`
+
+Role:
+
+- ScriptableObject database for worker action result tuning.
+- Maps `ActionType` to duration and `WorkerStatDelta`.
+- Provides one source of truth for both action execution and selector prediction.
+
+Should not:
+
+- Execute actions.
+- Mutate `WorkerStats`.
+- Decide behavior priority.
+- Depend on `WorkerAI`.
 
 ### WorkerStats
 
@@ -349,13 +396,14 @@ Role:
 
 - Owns worker stat values.
 - Clamps hunger, thirst, and fatigue.
-- Provides stat mutation methods.
+- Applies generic `WorkerStatDelta` values.
 - Implements `ITickable`.
 
 Should not:
 
 - Decide what action to take.
 - Know about selectors, actions, destinations, or movement.
+- Know action-specific cost or reward numbers.
 
 ### WorkerMover
 
@@ -442,6 +490,7 @@ WorkerAI
 
 WorkerDefaultActionSelector
   -> WorkerActionSet
+  -> WorkerActionResultStatData through WorkerActionSet lookup
   -> DestinationProvider
 
 WorkerActionPlan
@@ -459,6 +508,7 @@ WorkerAIManager
   instantiates WorkerAI prefab
   creates WorkerStats / WorkerMover / WorkerActionContext
   creates a worker-specific IActionSelector from its selector entries
+  injects the selector template's WorkerActionSet into selectors that require setup
   calls WorkerAI.Init(context, selector)
 
 WorkerAI
@@ -470,6 +520,7 @@ WorkerAI
 WorkerDefaultActionSelector
   reads WorkerStats through context
   uses WorkerActionSet to get IAction
+  may use WorkerActionSet to read action result data
   uses its DestinationProvider dependency to decide if movement is needed
   returns WorkerActionPlan containing one or more queued actions
 
@@ -507,8 +558,12 @@ WorkerMover
 
 ```text
 EatAction / DrinkAction / RestAction / WorkAction
+  use injected WorkerActionResultStatEntry
   use WorkerActionContext.Stats
-  call WorkerStats mutation methods
+  call WorkerStats.Apply(entry.StatDelta)
+
+WorkerActionResultStatData
+  owns action duration and stat delta tuning
 
 WorkerStats
   owns clamped stat values
@@ -532,9 +587,10 @@ Behavior Graph nodes should remain bridge code. They should not become the main 
 1. Add a new value to `ActionType` if the behavior needs selection through `WorkerActionSet`.
 2. Create a new `IAction` implementation under `Assets/Scripts/Actors/Worker/Actions`.
 3. Register the action in `WorkerActionSet`.
-4. Update the selector or create a new selector that can choose the action.
-5. Queue multiple actions in `WorkerActionPlan` when the behavior requires a sequence.
-6. Add required plan data to `WorkerActionPlan` only when the data belongs to the action sequence itself, not to worker stats or low-level capability settings.
+4. Add a `WorkerActionResultStatData` entry if the behavior has duration, cost, or reward values.
+5. Update the selector or create a new selector that can choose the action.
+6. Queue multiple actions in `WorkerActionPlan` when the behavior requires a sequence.
+7. Add required plan data to `WorkerActionPlan` only when the data belongs to the action sequence itself, not to worker stats or low-level capability settings.
 
 Do not put new behavior directly in `WorkerAI`.
 

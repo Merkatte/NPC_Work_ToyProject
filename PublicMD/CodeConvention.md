@@ -41,6 +41,7 @@
 - `Cancel()` must be safe to call even if the action has not fully started or has already been stopped.
 - `Tick()` should not allocate avoidable objects and should not perform expensive lookups repeatedly.
 - An action may read the current plan, but it should not create a new plan or decide the next high-level behavior.
+- Action duration, cost, and reward tuning should live in worker data assets or data providers, not as hardcoded values inside `WorkerAI` or concrete action implementations.
 
 ## Plan Ownership
 - Selectors build action plans.
