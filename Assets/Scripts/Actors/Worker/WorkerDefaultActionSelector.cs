@@ -45,7 +45,10 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
         if (TryGetNeededActionType(context, PrepareThreshold, out actionType))
             return TryCreatePlan(context, actionType, out plan);
 
-        return TryCreatePlan(context, ActionType.Work, out plan);
+        if (!_actionSet.TryGetResultStatEntry(ActionType.Work, out WorkerActionResultStatEntry workResult))
+            return false;
+
+        return TryCreatePlan(context, workResult.ActionType, out plan);
     }
 
     private bool TryGetNeededActionType(WorkerActionContext context, float threshold, out ActionType actionType)

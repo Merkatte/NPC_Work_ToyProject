@@ -3,22 +3,29 @@ using WorkerEnum;
 
 public class RestAction : IAction
 {
-    private float _timer;
+    private readonly WorkerActionResultStatEntry resultStatEntry;
+    private float timer;
     
     public ActionType ActionType => ActionType.Rest;
+
+    public RestAction(WorkerActionResultStatEntry resultStatEntry)
+    {
+        this.resultStatEntry = resultStatEntry;
+    }
+
     public void Start(WorkerActionContext context)
     {
-        _timer = 1.5f;
+        timer = resultStatEntry.Duration;
     }
 
     public ActionState Tick(WorkerActionContext context)
     {
-        _timer -= Time.deltaTime;
+        timer -= Time.deltaTime;
         
-        if (_timer > 0f)
+        if (timer > 0f)
             return ActionState.Running;
 
-        context.Stats.Rest(50f);
+        context.Stats.Apply(resultStatEntry.StatDelta);
         return ActionState.Success;
     }
 

@@ -3,22 +3,29 @@ using WorkerEnum;
 
 public class EatAction: IAction
 {
+    private readonly WorkerActionResultStatEntry resultStatEntry;
+    private float timer;
+
     public ActionType ActionType => ActionType.Eat;
 
-    private float _timer = 2f;
+    public EatAction(WorkerActionResultStatEntry resultStatEntry)
+    {
+        this.resultStatEntry = resultStatEntry;
+    }
+
     public void Start(WorkerActionContext context)
     {
-        _timer = 2f;
+        timer = resultStatEntry.Duration;
     }
 
     public ActionState Tick(WorkerActionContext context)
     {
-        _timer -= Time.deltaTime;
+        timer -= Time.deltaTime;
         
-        if (_timer > 0f)
+        if (timer > 0f)
             return ActionState.Running;
         
-        context.Stats.Eat(50f);
+        context.Stats.Apply(resultStatEntry.StatDelta);
         return ActionState.Success;
     }
 

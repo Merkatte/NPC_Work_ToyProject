@@ -3,13 +3,19 @@ using WorkerEnum;
 
 public class WorkAction : IAction
 {
+    private readonly WorkerActionResultStatEntry resultStatEntry;
     private float timer;
 
     public ActionType ActionType => ActionType.Work;
 
+    public WorkAction(WorkerActionResultStatEntry resultStatEntry)
+    {
+        this.resultStatEntry = resultStatEntry;
+    }
+
     public void Start(WorkerActionContext context)
     {
-        timer = 2f;
+        timer = resultStatEntry.Duration;
     }
 
     public ActionState Tick(WorkerActionContext context)
@@ -19,7 +25,7 @@ public class WorkAction : IAction
         if (timer > 0f)
             return ActionState.Running;
 
-        context.Stats.Work(10f, 10f, 20f);
+        context.Stats.Apply(resultStatEntry.StatDelta);
         return ActionState.Success;
     }
 

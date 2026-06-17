@@ -31,22 +31,6 @@ public class WorkerStats: ITickable
         private set => _fatigue = Mathf.Clamp(value, MIN_FATIGUE_VAL, MAX_FATIGUE_VAL);
     }
 
-    public void Eat(float amount) {
-        Hunger -= amount;
-        Debug.Log("Worker ate some food!");
-    }
-
-    public void Drink(float amount) {
-        Thirst -= amount;
-        Debug.Log("Worker drink water");
-    }
-
-    public void Rest(float amount) {
-        Fatigue -= amount;
-        Debug.Log("Worker Rest!");
-    }
-    public void Work(float amount) => Fatigue += amount;
-
     public WorkerStats(float hunger, float thirst, float fatigue)
     {
         Hunger = hunger;
@@ -60,11 +44,10 @@ public class WorkerStats: ITickable
         Thirst = Mathf.Max(0f, Thirst + Time.deltaTime);
     }
     
-    public void Work(float hunger, float thirst, float fatigue)
+    public void Apply(WorkerStatDelta delta)
     {
-        Debug.Log("Worker did hard work!");
-        Hunger += hunger;
-        Thirst += thirst;
-        Fatigue += fatigue;
+        Hunger += delta.Hunger;
+        Thirst += delta.Thirst;
+        Fatigue += delta.Fatigue;
     }
 }
