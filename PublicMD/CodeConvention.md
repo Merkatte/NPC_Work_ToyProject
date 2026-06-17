@@ -50,6 +50,26 @@
 - Context may expose the active plan, but context should not decide or replace plans on its own.
 - A plan should contain execution parameters, not hidden behavior logic.
 
+## Data Assets
+- A data asset (ScriptableObject or CSV) must have one clear purpose, the same way a script has one
+  clear responsibility. Separate data by role, not by convenience.
+- A base-stat asset for an entity must contain only that entity's own intrinsic stats. For example,
+  a WorkerAI stat asset holds only true worker stats such as move speed or health.
+- Data that is affected by a stat but is not itself that entity's stat must live in a separate
+  ScriptableObject or CSV. For example, armor defense, equipment modifiers, or item bonuses belong
+  in their own data asset, not inside the worker base-stat asset.
+- Keep one source of truth per concept. Do not merge unrelated concepts (base stats, equipment
+  tuning, drop tables, action tuning) into a single mixed asset.
+- Match the storage format to the data shape: use ScriptableObject for small designer-tuned sets and
+  enum-keyed lookups; use CSV when the data is large, tabular, or row-heavy and edited in bulk.
+- Place a data asset under the domain folder that owns it, the same as scripts. Worker-owned data
+  belongs under `Assets/Scripts/Actors/Worker/Data`; do not put domain-specific data in a global
+  folder.
+- A consumer should read one concept from one data asset. Mixing concepts forces readers to load and
+  understand unrelated data just to use one value.
+- `WorkerActionResultStatData` is the existing precedent: it holds only per-`ActionType` action
+  result tuning and nothing else. New data assets should follow the same single-purpose shape.
+
 ## Interfaces
 - Use interfaces when multiple scripts share the same role and other scripts should depend on that shared role.
 - Do not create a one-to-one interface for a single concrete script unless there is an immediate, concrete need.

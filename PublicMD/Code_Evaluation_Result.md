@@ -2,54 +2,62 @@
 
 ## Purpose
 
-This document records a code quality and architecture review of the current Unity worker/NPC
-prototype after the Claude Code CLI bridge-code fixes. The review checks the code against:
+This document records a lead-programmer style review of the current Unity worker/NPC prototype after
+the wheat reward and warehouse deposit workflow was added.
+
+The review checks the code against:
 
 - `PublicMD/CodeConvention.md`
 - `PublicMD/ProjectStructure.md`
-- the runtime ownership rule that `WorkerAI` stays execution-oriented and `WorkerActionSet`
-  stays selector/action-construction-side.
+- `reviewing-npc-work-code/references/review-workflow.md`
+- the ownership rule that `WorkerAI` remains execution-only and worker behavior lives in selectors,
+  actions, context capabilities, data, and providers.
 
 Production code was not modified as part of this review.
 
 ## Review Snapshot
 
-- Date: 2026-06-17
+- Date: 2026-06-18
 - Scope: `.cs` files under `Assets/Scripts` and `Assets/BehaviorGraph/CustomActionNode`, plus
-  relevant `Assets/BehaviorGraph/FarmerGraph.asset`, `SampleScene.unity`, and `FarmerAI.prefab`
-  references.
-- Sources: `CodeConvention.md`, `ProjectStructure.md`, current C# scripts, Behavior Graph asset
-  references, scene/prefab serialized references.
+  relevant `SampleScene.unity`, `FarmerAI.prefab`, and `FarmerGraph.asset` serialized references.
+- Sources: current `CodeConvention.md`, `ProjectStructure.md`, previous
+  `Code_Evaluation_Result.md`, C# scripts, action result data asset, scene/prefab/graph wiring.
 - Verification: `dotnet build Assembly-CSharp.csproj --no-restore` passed with 0 warnings and
   0 errors.
+- Working tree note: `Assets/Prefab/FarmerAI.prefab` and `PublicMD/CodeConvention.md` were already
+  modified before this report update. They were reviewed as current workspace state but not changed
+  by this review.
 
 ## Executive Summary
 
-The previous High-risk Behavior Graph findings have been addressed. `EnsureWorkerHasActionNode`
-no longer scans the worker `GameObject` for a selector; it delegates to
-`WorkerAI.TryEnsureCurrentAction()`. The broken `MoveToPlanDestinationNode` was removed, and the
-current `FarmerGraph.asset` references only `EnsureWorkerHasActionNode` and
-`RunWorkerCurrentActionNode`, so there is no stale graph reference to the deleted node.
+The architecture still keeps the main boundary intact: `WorkerAI` is not deciding wheat behavior,
+does not know `WorkerActionSet`, and does not read action result data. The wheat workflow was added
+mostly in the correct layers: `WorkAction` adds carried wheat from data, `WorkerCarryStorage` owns
+the carried amount, `WorkerDefaultActionSelector` decides when full workers should deposit, and
+`DepositWheatAction` executes deposit timing.
 
-The core worker architecture is now in better shape: `WorkerAI` remains the active plan lifecycle
-owner, action cost/reward data lives in `WorkerActionResultStatData`, and `WorkerActionSet`
-remains outside the worker prefab. No Critical or High issues were found in the current code.
+The main functional gap is that deposited wheat is not stored anywhere. `DepositWheatAction` calls
+`WorkerCarryStorage.DepositAllWheat()` and discards the returned amount. `WarehouseObject` exists in
+the scene only as a destination; there is no `WarehouseStorage`, provider, or context capability that
+receives and persists deposited wheat. This means the visible carry loop works, but the economic
+reward is effectively lost on deposit.
 
-The main remaining work is cleanup and documentation alignment: `ProjectStructure.md` still
-documents the removed `MoveToPlanDestinationNode`, several older style issues remain in
-`DestinationProvider`, `WorkerMover`, `WorkerStats`, and `TickManager`, and stale enum/interface
-items should be intentionally removed or justified.
+No Critical issues were found. One High issue was found: missing warehouse inventory persistence.
+Most remaining issues are Medium/Low cleanup: destination lookup hides missing scene wiring, action
+result data lacks validation, several stale enums/interfaces remain, and older style/debug/comment
+issues are still present.
 
 ## Improvements Since Previous Review
 
-- `EnsureWorkerHasActionNode` now depends on `WorkerAI.TryEnsureCurrentAction()` instead of
-  directly searching for selectors.
-- `MoveToPlanDestinationNode` was deleted, removing both prior problems: same-GameObject
-  `WorkerActionSet` lookup and direct `WorkerActionContext.SetPlan()` bypass.
-- `WorkerAI` now exposes `TryEnsureCurrentAction()` as a single shared entry point for the
-  autonomous update path and the Behavior Graph ensure node.
-- `FarmerGraph.asset` does not reference the deleted direct-move node.
-- Build verification still passes after the bridge changes.
+- `ProjectStructure.md` no longer documents the deleted `MoveToPlanDestinationNode`; the previous
+  documentation drift was resolved.
+- `ActionType.DepositWheat`, `DepositWheatAction`, `WorkerCarryStorage`, wheat result data, and a
+  warehouse destination were added without putting behavior logic into `WorkerAI`.
+- `SampleScene.unity` now serializes `_initialCarryStorage` and maps `ActionType: 6` to
+  `WarehouseObject` in `DestinationProvider`.
+- `FarmerAI.prefab` still only owns `WorkerAI` and `WorkerMovementStats`; it does not own
+  `WorkerActionSet`, which matches the current selector-side action-set design.
+- Build verification still passes after the wheat workflow.
 
 ## Findings By Severity
 
@@ -59,206 +67,256 @@ None found.
 
 ### High
 
-None found.
+- `Assets/Scripts/Actors/Worker/Actions/DepositWheatAction.cs`
+  - Issue: deposited wheat is discarded instead of being persisted to a warehouse or storage owner.
+  - Evidence: `Tick()` calls `context.CarryStorage.DepositAllWheat();` and ignores the returned
+    amount. Search found `WarehouseObject` only in `SampleScene.unity`; no `WarehouseStorage`,
+    `StoredWheat`, or equivalent script exists.
+  - Risk: the worker appears to deposit wheat, but the reward is lost. This violates the gameplay
+    requirement that work produces wheat that is stored in the warehouse.
+  - Recommendation: add a dedicated warehouse inventory owner such as `WarehouseStorage` with
+    `StoredWheat` and `AddWheat(int amount)`. Inject or provide it through an explicit provider or
+    context capability, then have `DepositWheatAction` transfer the returned deposited amount into
+    that storage.
 
 ### Medium
 
-- `PublicMD/ProjectStructure.md`
-  - Issue: The document still lists and describes `MoveToPlanDestinationNode`, but the script and
-    `.meta` file have been deleted.
-  - Evidence: `ProjectStructure.md` still includes `MoveToPlanDestinationNode.cs` in the file
-    tree and has a Behavior Graph role section for it.
-  - Risk: future agents may reintroduce or reason around a node that no longer exists.
-  - Recommendation: update `ProjectStructure.md` to remove `MoveToPlanDestinationNode` or add a
-    note that direct movement bridging was removed.
+- `Assets/Scripts/Actors/Worker/WorkerDefaultActionSelector.cs`
+  - Issue: missing destination data is treated the same as "movement is not needed".
+  - Evidence: `TryGetMoveDestination()` returns `false` when `_destinationProvider` is missing or
+    `TryGetDestinationPosition()` fails, and `TryCreatePlan()` then creates the target action
+    without movement.
+  - Risk: scene wiring mistakes can make `Work`, `Eat`, `Drink`, `Rest`, or `DepositWheat` execute
+    in place. This is especially risky for `DepositWheat` because it can clear carried wheat without
+    reaching a warehouse.
+  - Recommendation: separate "already at destination" from "destination lookup failed". For actions
+    that require a destination, fail plan creation when the provider or mapping is missing.
 
 - `Assets/Scripts/Provider/DestinationProvider.cs`
-  - Issue: `TryGetDestinationPosition()` iterates `_destinationInfos` with no null guard, and
-    checks `info.Destination == null` on a Unity `GameObject`.
-  - Risk: missing Inspector data can throw a null-reference exception; the Unity null-check style
-    also violates `CodeConvention.md`.
-  - Recommendation: add an `_destinationInfos == null` guard and use `!info.Destination`.
-
-- `Assets/Scripts/Provider/DestinationProvider.cs`
-  - Issue: `DestinationInfo` exposes `Destination` and `ActionType` as public fields.
-  - Risk: this violates the `[SerializeField] private` Inspector field convention and makes the
-    data holder less consistent with the rest of the project.
-  - Recommendation: convert fields to `[SerializeField] private` with read-only public
+  - Issue: `_destinationInfos` has no null guard, and `DestinationInfo` uses public mutable fields.
+  - Evidence: `TryGetDestinationPosition()` immediately iterates `_destinationInfos.Length`;
+    `DestinationInfo` exposes `public GameObject Destination;` and `public ActionType ActionType;`.
+  - Risk: unassigned arrays can throw at runtime, and the data holder violates the serialized
+    field convention.
+  - Recommendation: guard `_destinationInfos == null`, use Unity truthiness for missing
+    `GameObject`, and convert `DestinationInfo` to `[SerializeField] private` fields with read-only
     properties.
 
-- `Assets/Scripts/Actors/Worker/Context/WorkerMover.cs`
-  - Issue: Unity object null checks use `target == null` and `movementStats == null`.
-  - Risk: violates the project's Unity null-check convention.
-  - Recommendation: use `!target` and `!movementStats` for Unity object references.
+- `Assets/Scripts/Actors/Worker/Data/WorkerActionResultStatData.cs`
+  - Issue: action result data has no validation for duplicate or missing `ActionType` entries.
+  - Evidence: `TryGetEntry()` returns the first matching entry and silently returns `false` when an
+    entry is missing. `WorkerActionSet` cannot create timer actions whose entries are absent.
+  - Risk: designer data mistakes can quietly disable action creation or make duplicate entries hard
+    to diagnose.
+  - Recommendation: add editor-time validation, such as `OnValidate()` duplicate checks and explicit
+    warnings for required action types used by the active `WorkerActionSet`.
+
+- `Assets/Scripts/Actors/Worker/Data/WorkerActionResultStatData.cs`
+  - Issue: the class name says `StatData`, but entries now include `_wheatDelta`, a carried-item
+    reward.
+  - Evidence: `WorkerActionResultStatEntry` contains `WorkerStatDelta` and `int WheatDelta`.
+  - Risk: the runtime responsibility is still "action result tuning", but the name can mislead
+    future edits into treating all rewards as stats or into adding unrelated reward data here.
+  - Recommendation: either rename toward `WorkerActionResultData` / `WorkerActionResultEntry`, or
+    document clearly that this asset owns per-action result tuning, including item deltas.
 
 - `Assets/Scripts/Actors/Worker/Context/WorkerMover.cs`
-  - Issue: private readonly fields `target` and `movementStats` do not follow the currently
-    stated `_camelCase` private field rule in `CodeConvention.md`.
-  - Recommendation: rename to `_target` and `_movementStats`, or clarify the convention if
-    constructor-injected readonly fields should use plain `camelCase`.
-
-- `Assets/Scripts/Actors/Worker/Context/WorkerMover.cs`
-  - Issue: `MoveTo(Vector3, Vector3)` has no callers in the current codebase.
-  - Risk: dead movement code obscures the actual movement path (`StartMove`/`TickMove`).
-  - Recommendation: remove it unless a near-term caller exists.
-
-- `Assets/Scripts/Actors/Worker/Context/WorkerStats.cs`
-  - Issue: stat bounds are declared as `private readonly float MIN_*_VAL`.
-  - Risk: fixed values should be `const`, and the naming style conflicts with the C# convention
-    used elsewhere in the project.
-  - Recommendation: rename to `private const float MinHungerValue`, etc.
+  - Issue: field naming and Unity null checks do not match current convention, and
+    `MoveTo(Vector3, Vector3)` is unused.
+  - Evidence: private readonly fields are `target` and `movementStats`; null checks use
+    `target == null` / `movementStats == null`; `MoveTo(...)` has no current callers.
+  - Risk: stale movement APIs obscure the supported `StartMove` / `TickMove` path and style drift
+    makes future changes less consistent.
+  - Recommendation: rename fields to `_target` / `_movementStats`, use Unity truthiness, and remove
+    the unused `MoveTo(...)` unless a near-term caller exists.
 
 - `Assets/Scripts/Interface/IActionSet.cs`
-  - Issue: `IActionSet<TKey>` exposes only `TryGetAction(TKey, out IAction)`, while current
-    selectors depend on concrete `WorkerActionSet` for destination-injected renting, result stat
-    lookup, and action return.
-  - Risk: the interface does not reduce coupling and does not represent the actual role.
+  - Issue: `IActionSet<TKey>` does not represent actual selector needs.
+  - Evidence: it exposes only `TryGetAction(TKey, out IAction)`, while selectors depend on concrete
+    `WorkerActionSet` for destination-injected move rental, result data lookup, and returning
+    actions.
+  - Risk: the interface does not reduce coupling and can give a false sense of replaceability.
   - Recommendation: remove it until a real abstraction is needed, or replace it with a
-    worker-specific interface that matches actual selector needs.
+    worker-specific interface that includes the actual action-set role.
 
 ### Low
 
-- `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
-  - Issue: normal spawn flow still contains several `Debug.Log` calls, including raw object
-    logging.
-  - Recommendation: remove or gate behind a debug flag.
+- `Assets/Scripts/Actors/Worker/WorkerAI.cs` and
+  `Assets/BehaviorGraph/CustomActionNode/EnsureWorkerHasActionNode.cs`
+  - Issue: comments are encoding-corrupted and no longer readable.
+  - Evidence: comments near `TryEnsureCurrentAction()` and `EnsureWorkerHasActionNode.OnStart()`
+    render as broken text.
+  - Recommendation: remove the comments or rewrite them as short ASCII comments.
 
-- `Assets/Scripts/Actors/Worker/Actions/MoveAction.cs`
-  - Issue: `Debug.Log("Worker Moving Start")` runs on every movement start.
-  - Recommendation: remove or gate behind a debug flag.
-
-- `Assets/Scripts/Actors/Worker/Actions/DrinkAction.cs`
-  - Issue: file starts with a stray leading blank/space before `using UnityEngine;`.
-  - Recommendation: remove the stray whitespace.
+- `Assets/Scripts/Actors/Worker/WorkerAI.cs`
+  - Issue: stale commented-out `SetAction()` code remains.
+  - Recommendation: remove the commented block; `SetPlan()` and `TryEnsureCurrentAction()` now
+    express the intended API.
 
 - `Assets/Scripts/Actors/Worker/Context/WorkerActionContext.cs`
-  - Issue: commented-out `Owner` code remains without explanation.
-  - Recommendation: remove the dead comment, or replace it with a specific TODO if the owner
-    reference is intentionally deferred.
+  - Issue: stale commented-out owner code remains.
+  - Evidence: `//public WorkerAI Owner { get; }` and `//Owner = owner;`.
+  - Recommendation: remove the dead comments.
+
+- `Assets/Scripts/Actors/Worker/WorkerAIManager.cs` and
+  `Assets/Scripts/Actors/Worker/Actions/MoveAction.cs`
+  - Issue: normal runtime flow logs through `Debug.Log`.
+  - Evidence: spawn flow logs raw worker objects, spawn counts, and `MoveAction.Start()` logs
+    `"Worker Moving Start"`.
+  - Recommendation: remove these logs or gate them behind an explicit debug flag.
+
+- `Assets/Scripts/Actors/Worker/Context/WorkerStats.cs`
+  - Issue: fixed stat bounds are instance `readonly` fields with all-caps names.
+  - Recommendation: convert to `private const float MinHungerValue`, etc.
+
+- `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
+  - Issue: `WorkerInitialCarryStorage._maxWheat = 5` is a serialized default inside manager code.
+  - Risk: acceptable for the prototype, but if more carry limits or worker archetypes are added,
+    manager defaults will become tuning data.
+  - Recommendation: keep this as a short-term serialized default, or move worker starting/capacity
+    values into a dedicated worker initial-state data asset when more worker types appear.
+
+- `Assets/Scripts/Enum/ActionType.cs`, `Assets/Scripts/Enum/DestinationType.cs`,
+  `Assets/Scripts/Enum/TickType.cs`
+  - Issue: stale enum values remain.
+  - Evidence: `ActionType.Sleep` has no registered action; `DestinationType` is unused by current
+    `DestinationProvider`; `TickType.Custom` falls back to the normal ticker bucket.
+  - Recommendation: remove or explicitly document these values.
+
+- `Assets/Scripts/Interface/IAction.cs`, `Assets/Scripts/Interface/ITickable.cs`,
+  `Assets/Scripts/Enum/ActionState.cs`, `Assets/Scripts/Enum/DestinationType.cs`
+  - Issue: unused `using UnityEngine;` remains.
+  - Recommendation: remove unused usings during cleanup.
 
 - `Assets/Scripts/Manager/TickManager.cs`
-  - Issue: serialized fields `slowtick`, `normaltick`, and `fasttick` do not use `_camelCase`.
-  - Recommendation: rename to `_slowTick`, `_normalTick`, `_fastTick` with
-    `[FormerlySerializedAs]` if serialized scene data must be preserved.
-
-- `Assets/Scripts/Enum/ActionState.cs`, `Assets/Scripts/Enum/DestinationType.cs`,
-  `Assets/Scripts/Interface/IAction.cs`, `Assets/Scripts/Interface/ITickable.cs`
-  - Issue: unused `using UnityEngine;`.
-  - Recommendation: remove unused usings.
-
-- `Assets/Scripts/Enum/TickType.cs`
-  - Issue: `TickType.Custom` is defined but not handled in `TickManager.GetTickers()` and has no
-    current callers.
-  - Recommendation: remove `Custom` or implement/document its behavior.
+  - Issue: serialized fields `slowtick`, `normaltick`, and `fasttick` do not follow `_camelCase`.
+  - Recommendation: rename to `_slowTick`, `_normalTick`, and `_fastTick` with
+    `[FormerlySerializedAs]` if scene data must be preserved.
 
 ## Findings By File
 
 ### `Assets/Scripts/Actors/Worker/WorkerAI.cs`
 
-- `TryEnsureCurrentAction()` is an acceptable consolidation of existing behavior. `WorkerAI`
-  still asks the selector for a plan, but this was already part of its documented lifecycle and
-  does not move selection policy into `WorkerAI`.
-- The Behavior Graph ensure node now has a safe public entry point without reading selector or
-  action-set internals.
-- Minor style note: the newly added explanatory comments are useful, but production code should
-  keep comments concise and encoding-stable.
-
-### `Assets/BehaviorGraph/CustomActionNode/EnsureWorkerHasActionNode.cs`
-
-- Previous High finding is resolved. The node now depends only on `WorkerAI` and delegates action
-  selection/plan assignment through `TryEnsureCurrentAction()`.
-- This aligns better with the bridge role: the node no longer scans for selectors or action sets.
-
-### `Assets/BehaviorGraph/CustomActionNode/RunWorkerCurrentActionNode.cs`
-
-- No issues found. It remains a thin bridge over `WorkerAI.TickCurrentAction()`.
-
-### `Assets/BehaviorGraph/CustomActionNode/MoveToPlanDestinationNode.cs`
-
-- The file was deleted. This removes the prior action-set lookup and direct context plan-setting
-  defects.
-- `FarmerGraph.asset` currently has no reference to this node, so the deletion appears safe from
-  the checked serialized graph data.
-- `ProjectStructure.md` still needs to be updated to match the deletion.
+- Role is still correct: it owns active plan lifecycle, starts/ticks/cancels actions, and asks the
+  injected selector for a plan.
+- It does not know about wheat, warehouse storage, action result data, or `WorkerActionSet`.
+- Cleanup needed: encoding-corrupted comments and stale commented-out `SetAction()`.
 
 ### `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
 
-- Correctly does not require worker prefabs to own `WorkerActionSet`.
-- Correctly resolves selector-side `WorkerActionSet` for selectors that implement
-  `IWorkerActionSelectorSetup`.
-- Cleanup remains: several debug logs should be removed or gated before production-like use.
+- Correctly creates `WorkerStats`, `WorkerCarryStorage`, `WorkerMover`, and
+  `WorkerActionContext`, then injects context and selector into `WorkerAI`.
+- Correctly resolves selector-side `WorkerActionSet` from selector instances instead of requiring
+  the worker prefab to own it.
+- Cleanup needed: normal-flow debug logs and possible future extraction of initial worker/carry
+  tuning into a data asset if worker archetypes grow.
 
 ### `Assets/Scripts/Actors/Worker/WorkerDefaultActionSelector.cs`
 
-- Role remains clean: it decides intent and builds plans, while actions execute.
-- `CriticalThreshold` and `PrepareThreshold` are named constants.
-- Future predictive work-capacity logic should continue using `WorkerActionResultStatData`
-  through `WorkerActionSet`, not concrete action classes.
+- Correct layer for the new deposit decision. It checks critical needs, then full carry storage,
+  then prepare-level needs, then work.
+- It does not mutate stats or carried wheat.
+- Main issue: failed destination lookup becomes "no movement needed", allowing in-place execution.
 
 ### `Assets/Scripts/Actors/Worker/WorkerActionSet.cs`
 
-- Pooling and data-backed action creation remain in the right place.
-- Manual action registration remains a documented limitation.
-- The implemented interface is still too narrow for actual selector usage.
+- Correctly owns action pooling and data-backed construction.
+- `DepositWheatAction` registration is in the correct place.
+- Remaining limitation: manual registration and dependency on concrete `WorkerActionSet` are
+  documented but still a maintenance cost.
 
-### `Assets/Scripts/Actors/Worker/Actions/*.cs`
+### `Assets/Scripts/Actors/Worker/Actions/WorkAction.cs`
 
-- Work/Eat/Drink/Rest still avoid hardcoded duration/stat effect values.
-- `MoveAction` still contains a normal-flow debug log.
-- Empty `Cancel()` bodies on timer actions are acceptable because those actions hold no external
-  resources yet.
+- Correctly applies stat delta and wheat delta from injected data.
+- Does not know selector logic or data asset references.
+
+### `Assets/Scripts/Actors/Worker/Actions/DepositWheatAction.cs`
+
+- Correctly models deposit as an `IAction` and uses injected duration/stat delta data.
+- High issue: clears carried wheat but does not transfer it to any warehouse storage.
+
+### `Assets/Scripts/Actors/Worker/Actions/MoveAction.cs`
+
+- Correctly delegates movement to `WorkerMover`.
+- Cleanup needed: normal-flow debug log and minor spacing/style consistency.
+
+### `Assets/Scripts/Actors/Worker/Context/WorkerCarryStorage.cs`
+
+- Responsibility is clean for carried wheat: current amount, capacity clamp, add, and deposit.
+- It should not become the warehouse inventory owner. Keep persistent stored wheat in a separate
+  warehouse component or storage service.
+
+### `Assets/Scripts/Actors/Worker/Context/WorkerActionContext.cs`
+
+- Exposes `WorkerCarryStorage` as a worker capability, which is acceptable for actions/selectors.
+- Cleanup needed: stale commented-out owner code.
 
 ### `Assets/Scripts/Actors/Worker/Data/*.cs`
 
-- Data responsibility remains clean: ScriptableObject lookup and serializable value objects only.
-- Future improvement: add editor validation for duplicate `ActionType` entries or missing
-  required entries.
-
-### `Assets/Scripts/Actors/Worker/Context/*.cs`
-
-- `WorkerStats.Apply(WorkerStatDelta)` remains a clean generic stat mutation point.
-- `WorkerMover` still has null-check style, field naming, and dead method cleanup items.
-- `WorkerActionContext` still has stale commented-out owner code.
+- `WorkerActionResultStatEntry` now carries `_wheatDelta`; this keeps work reward values out of
+  action code.
+- Naming is now slightly misleading because the data is no longer stat-only.
+- Add validation for duplicate/missing action entries.
 
 ### `Assets/Scripts/Provider/DestinationProvider.cs`
 
-- Role is correct: destination lookup only.
-- Needs null handling and field-style cleanup.
+- Role remains correct: lookup only.
+- Needs null handling and serialized field style cleanup.
+
+### `Assets/BehaviorGraph/CustomActionNode/*.cs`
+
+- Behavior Graph nodes remain bridge code.
+- `EnsureWorkerHasActionNode` depends on `WorkerAI.TryEnsureCurrentAction()` and does not search
+  for selectors or action sets.
+- Cleanup needed: encoding-corrupted comment in `EnsureWorkerHasActionNode`.
+
+### `Assets/Scenes/SampleScene.unity`
+
+- `WorkerAIManager` has `_initialCarryStorage` serialized with `_maxWheat: 5`.
+- `DestinationProvider` maps `ActionType: 6` to `WarehouseObject`.
+- `WarehouseObject` is only a destination object; it has no warehouse inventory component.
+
+### `Assets/Prefab/FarmerAI.prefab`
+
+- Contains `WorkerAI` and `WorkerMovementStats`.
+- No `WorkerActionSet` is attached to the worker prefab, which matches current ownership rules.
 
 ## Cross-Cutting Findings
 
-- Behavior Graph High-risk ownership drift is currently resolved for checked assets because the
-  broken direct movement bridge is gone and the ensure node routes through `WorkerAI`.
-- Documentation drift now matters: `ProjectStructure.md` still describes the deleted direct move
-  node.
-- Namespace policy remains inconsistent. `ActionState` and `ActionType` use `WorkerEnum`,
-  `DestinationType` uses `ProviderEnum`, `TickType` has no namespace, and most worker scripts
-  have no namespace.
-- `DestinationType` is still stale because destination lookup is `ActionType` based.
-- `ActionType.Sleep` is still defined but no action is registered for it.
-- `TickType.Custom` is still defined but not implemented as a distinct tick bucket.
-- `FarmerAI.prefab` should not own `WorkerActionSet`; checked serialized references still place
-  `WorkerActionSet` on the selector setup in `SampleScene`, matching current architecture.
+- The added wheat workflow respects the main dependency direction, but the economy loop is
+  incomplete because deposited wheat has no storage owner.
+- Destination lookup currently collapses three states into one `false`: no provider, no mapping,
+  and already at destination. That makes runtime wiring mistakes hard to detect.
+- `WorkerActionResultStatData` is becoming "action result data" rather than stat-only data. That is
+  acceptable if kept scoped to per-action result tuning, but the name should be corrected before
+  more non-stat rewards are added.
+- Namespace policy remains inconsistent: `ActionType` / `ActionState` use `WorkerEnum`,
+  `DestinationType` uses `ProviderEnum`, `TickType` and most worker scripts have no namespace.
+- Several stale enum/interface items remain: `DestinationType`, `ActionType.Sleep`,
+  `TickType.Custom`, and the too-narrow `IActionSet<TKey>`.
 
 ## Positive Notes
 
-- The latest bridge change reduced dependencies in `EnsureWorkerHasActionNode`.
-- Removing `MoveToPlanDestinationNode` eliminated a concrete plan ownership violation.
-- `WorkerAI` remains close to the documented execution/lifecycle role.
-- `WorkerActionResultStatData` continues to provide a single source of truth for action duration
-  and stat deltas.
-- `WorkerActionPlan` remains simple and does not accumulate behavior logic.
-- `WorkerMovementStats` follows serialized field naming and clamps exposed values with named
-  constants.
+- `WorkerAI` remains free of work reward, warehouse, action-set, and data-asset responsibilities.
+- New wheat behavior was represented as actions and context capability rather than being pushed
+  into `WorkerAI`.
+- `WorkerCarryStorage` has a clear carried-item responsibility and does not decide behavior.
+- `WorkerDefaultActionSelector` owns the deposit decision without executing the deposit.
+- `SampleScene.unity` has the selector-side `WorkerActionSet` and warehouse destination connected.
+- `dotnet build Assembly-CSharp.csproj --no-restore` passes with 0 warnings and 0 errors.
 
 ## Recommended Next Actions
 
-1. Update `PublicMD/ProjectStructure.md` to remove or mark the deleted `MoveToPlanDestinationNode`.
-2. Clean up `DestinationProvider` null handling and field style.
-3. Normalize `WorkerMover` null checks, field names, and remove the unused `MoveTo` overload.
-4. Convert `WorkerStats` bounds to `private const float Min...` names.
-5. Remove or gate normal-flow debug logs in `WorkerAIManager` and `MoveAction`.
-6. Fix `TickManager` serialized field names with `[FormerlySerializedAs]` if needed.
-7. Decide namespace policy for the worker domain and enum folder.
-8. Verify or remove stale `DestinationType`, `ActionType.Sleep`, `TickType.Custom`, and the
-   currently too-narrow `IActionSet<TKey>`.
+1. Add warehouse inventory persistence: `WarehouseStorage` or equivalent, plus explicit injection or
+   provider access for `DepositWheatAction`.
+2. Change destination planning so missing provider/mapping fails required destination actions
+   instead of executing them in place.
+3. Add validation to `WorkerActionResultStatData` for duplicate and missing action entries.
+4. Rename `WorkerActionResultStatData` / `WorkerActionResultStatEntry` if the asset will continue
+   owning non-stat rewards such as wheat.
+5. Clean up `WorkerAI`, `EnsureWorkerHasActionNode`, and `WorkerActionContext` stale/broken
+   comments.
+6. Remove normal-flow debug logs in `WorkerAIManager` and `MoveAction`.
+7. Normalize `DestinationProvider`, `WorkerMover`, `WorkerStats`, and `TickManager` style issues.
+8. Remove or document stale `DestinationType`, `ActionType.Sleep`, `TickType.Custom`, and
+   `IActionSet<TKey>`.
