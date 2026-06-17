@@ -34,15 +34,26 @@ public class WorkerAI : MonoBehaviour
             return;
 
         context.Stats.Tick();
-        
-        if (!HasCurrentAction)
-        {
-            if (actionSelector.TrySelectAction(context, out WorkerActionPlan nextPlan))
-                SetPlan(nextPlan);
-        }
+        TryEnsureCurrentAction();
 
         if (HasCurrentAction)
             TickCurrentAction();
+    }
+
+    // 현재 action이 없으면 selector에 plan을 요청해 설정한다.
+    // WorkerAI.Update() 자율 흐름과 Behavior Graph 브릿지 노드가 공유하는 단일 진입점.
+    public bool TryEnsureCurrentAction()
+    {
+        if (!IsInitialized)
+            return false;
+
+        if (HasCurrentAction)
+            return true;
+
+        if (actionSelector.TrySelectAction(context, out WorkerActionPlan nextPlan))
+            SetPlan(nextPlan);
+
+        return HasCurrentAction;
     }
 
     public bool HasCurrentAction => currentPlan?.CurrentAction != null;

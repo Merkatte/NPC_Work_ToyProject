@@ -22,7 +22,6 @@ Assets/
     FarmerGraph.asset
     CustomActionNode/
       EnsureWorkerHasActionNode.cs
-      MoveToPlanDestinationNode.cs
       RunWorkerCurrentActionNode.cs
 
   Scripts/
@@ -101,9 +100,10 @@ The primary autonomous worker flow is:
 
 ```text
 WorkerAI.Update()
-  -> if no current action:
-       actionSelector.TrySelectAction(context, out plan)
-       WorkerAI.SetPlan(plan)
+  -> WorkerAI.TryEnsureCurrentAction()
+       if no current action:
+         actionSelector.TrySelectAction(context, out plan)
+         WorkerAI.SetPlan(plan)
   -> WorkerAI.TickCurrentAction()
        plan.CurrentAction.Start(context) once
        plan.CurrentAction.Tick(context) every frame while running
@@ -189,7 +189,9 @@ Role:
 
 - Owns the current `WorkerActionPlan`.
 - Receives `WorkerActionContext` and the active selector through `Init`.
-- Requests a plan when no action is running.
+- Exposes `TryEnsureCurrentAction()`: asks the selector for a plan if no action is currently
+  running. Called by `Update()` each frame and shared as the single entry point for Behavior
+  Graph bridge nodes that need to guarantee a plan is active.
 - Runs `Start`, `Tick`, and `Cancel` on the active action.
 - Advances to the next queued action when the current action succeeds.
 - Clears the active plan when the queue completes or an action fails.
@@ -470,13 +472,11 @@ Current status:
 ### Behavior Graph Nodes
 
 `EnsureWorkerHasActionNode`
-: Finds `WorkerAI`, asks the selector for a plan if the worker has no current action, and assigns the plan to `WorkerAI`.
+: Calls `WorkerAI.TryEnsureCurrentAction()`. Depends only on `WorkerAI` — does not search for
+  selectors or `WorkerActionSet` directly.
 
 `RunWorkerCurrentActionNode`
 : Calls `WorkerAI.TickCurrentAction()` and converts `ActionState` to Behavior Graph `Status`.
-
-`MoveToPlanDestinationNode`
-: Bridges a Behavior Graph `Vector3` destination into the same action-plan movement system. It gets the registered `MoveAction` from `WorkerActionSet`, creates a direct-position movement plan, starts the action, and ticks it.
 
 ## Dependency Structure
 

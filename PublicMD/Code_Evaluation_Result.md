@@ -2,327 +2,263 @@
 
 ## Purpose
 
-This document records a convention/architecture compliance review of the current C# scripts
-against `PublicMD/CodeConvention.md` and `PublicMD/ProjectStructure.md`.
+This document records a code quality and architecture review of the current Unity worker/NPC
+prototype after the Claude Code CLI bridge-code fixes. The review checks the code against:
 
-This is a **read-only analysis snapshot**. No code was modified as part of this review.
-Items listed here may already be fixed by the time this is read — verify against the current
-code before acting on any item.
+- `PublicMD/CodeConvention.md`
+- `PublicMD/ProjectStructure.md`
+- the runtime ownership rule that `WorkerAI` stays execution-oriented and `WorkerActionSet`
+  stays selector/action-construction-side.
 
-Scope reviewed: all `.cs` files under `Assets/Scripts` and `Assets/BehaviorGraph/CustomActionNode`
-(26 files total), checked against:
+Production code was not modified as part of this review.
 
-- `PublicMD/CodeConvention.md` (naming, field style, null-check style, structure, namespaces,
-  responsibility boundaries, action/plan ownership rules)
-- `PublicMD/ProjectStructure.md` (per-file "Role" / "Should not" rules, Known Design Notes)
+## Review Snapshot
 
----
+- Date: 2026-06-17
+- Scope: `.cs` files under `Assets/Scripts` and `Assets/BehaviorGraph/CustomActionNode`, plus
+  relevant `Assets/BehaviorGraph/FarmerGraph.asset`, `SampleScene.unity`, and `FarmerAI.prefab`
+  references.
+- Sources: `CodeConvention.md`, `ProjectStructure.md`, current C# scripts, Behavior Graph asset
+  references, scene/prefab serialized references.
+- Verification: `dotnet build Assembly-CSharp.csproj --no-restore` passed with 0 warnings and
+  0 errors.
+
+## Executive Summary
+
+The previous High-risk Behavior Graph findings have been addressed. `EnsureWorkerHasActionNode`
+no longer scans the worker `GameObject` for a selector; it delegates to
+`WorkerAI.TryEnsureCurrentAction()`. The broken `MoveToPlanDestinationNode` was removed, and the
+current `FarmerGraph.asset` references only `EnsureWorkerHasActionNode` and
+`RunWorkerCurrentActionNode`, so there is no stale graph reference to the deleted node.
+
+The core worker architecture is now in better shape: `WorkerAI` remains the active plan lifecycle
+owner, action cost/reward data lives in `WorkerActionResultStatData`, and `WorkerActionSet`
+remains outside the worker prefab. No Critical or High issues were found in the current code.
+
+The main remaining work is cleanup and documentation alignment: `ProjectStructure.md` still
+documents the removed `MoveToPlanDestinationNode`, several older style issues remain in
+`DestinationProvider`, `WorkerMover`, `WorkerStats`, and `TickManager`, and stale enum/interface
+items should be intentionally removed or justified.
+
+## Improvements Since Previous Review
+
+- `EnsureWorkerHasActionNode` now depends on `WorkerAI.TryEnsureCurrentAction()` instead of
+  directly searching for selectors.
+- `MoveToPlanDestinationNode` was deleted, removing both prior problems: same-GameObject
+  `WorkerActionSet` lookup and direct `WorkerActionContext.SetPlan()` bypass.
+- `WorkerAI` now exposes `TryEnsureCurrentAction()` as a single shared entry point for the
+  autonomous update path and the Behavior Graph ensure node.
+- `FarmerGraph.asset` does not reference the deleted direct-move node.
+- Build verification still passes after the bridge changes.
+
+## Findings By Severity
+
+### Critical
+
+None found.
+
+### High
+
+None found.
+
+### Medium
+
+- `PublicMD/ProjectStructure.md`
+  - Issue: The document still lists and describes `MoveToPlanDestinationNode`, but the script and
+    `.meta` file have been deleted.
+  - Evidence: `ProjectStructure.md` still includes `MoveToPlanDestinationNode.cs` in the file
+    tree and has a Behavior Graph role section for it.
+  - Risk: future agents may reintroduce or reason around a node that no longer exists.
+  - Recommendation: update `ProjectStructure.md` to remove `MoveToPlanDestinationNode` or add a
+    note that direct movement bridging was removed.
+
+- `Assets/Scripts/Provider/DestinationProvider.cs`
+  - Issue: `TryGetDestinationPosition()` iterates `_destinationInfos` with no null guard, and
+    checks `info.Destination == null` on a Unity `GameObject`.
+  - Risk: missing Inspector data can throw a null-reference exception; the Unity null-check style
+    also violates `CodeConvention.md`.
+  - Recommendation: add an `_destinationInfos == null` guard and use `!info.Destination`.
+
+- `Assets/Scripts/Provider/DestinationProvider.cs`
+  - Issue: `DestinationInfo` exposes `Destination` and `ActionType` as public fields.
+  - Risk: this violates the `[SerializeField] private` Inspector field convention and makes the
+    data holder less consistent with the rest of the project.
+  - Recommendation: convert fields to `[SerializeField] private` with read-only public
+    properties.
+
+- `Assets/Scripts/Actors/Worker/Context/WorkerMover.cs`
+  - Issue: Unity object null checks use `target == null` and `movementStats == null`.
+  - Risk: violates the project's Unity null-check convention.
+  - Recommendation: use `!target` and `!movementStats` for Unity object references.
+
+- `Assets/Scripts/Actors/Worker/Context/WorkerMover.cs`
+  - Issue: private readonly fields `target` and `movementStats` do not follow the currently
+    stated `_camelCase` private field rule in `CodeConvention.md`.
+  - Recommendation: rename to `_target` and `_movementStats`, or clarify the convention if
+    constructor-injected readonly fields should use plain `camelCase`.
+
+- `Assets/Scripts/Actors/Worker/Context/WorkerMover.cs`
+  - Issue: `MoveTo(Vector3, Vector3)` has no callers in the current codebase.
+  - Risk: dead movement code obscures the actual movement path (`StartMove`/`TickMove`).
+  - Recommendation: remove it unless a near-term caller exists.
+
+- `Assets/Scripts/Actors/Worker/Context/WorkerStats.cs`
+  - Issue: stat bounds are declared as `private readonly float MIN_*_VAL`.
+  - Risk: fixed values should be `const`, and the naming style conflicts with the C# convention
+    used elsewhere in the project.
+  - Recommendation: rename to `private const float MinHungerValue`, etc.
+
+- `Assets/Scripts/Interface/IActionSet.cs`
+  - Issue: `IActionSet<TKey>` exposes only `TryGetAction(TKey, out IAction)`, while current
+    selectors depend on concrete `WorkerActionSet` for destination-injected renting, result stat
+    lookup, and action return.
+  - Risk: the interface does not reduce coupling and does not represent the actual role.
+  - Recommendation: remove it until a real abstraction is needed, or replace it with a
+    worker-specific interface that matches actual selector needs.
+
+### Low
+
+- `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
+  - Issue: normal spawn flow still contains several `Debug.Log` calls, including raw object
+    logging.
+  - Recommendation: remove or gate behind a debug flag.
+
+- `Assets/Scripts/Actors/Worker/Actions/MoveAction.cs`
+  - Issue: `Debug.Log("Worker Moving Start")` runs on every movement start.
+  - Recommendation: remove or gate behind a debug flag.
+
+- `Assets/Scripts/Actors/Worker/Actions/DrinkAction.cs`
+  - Issue: file starts with a stray leading blank/space before `using UnityEngine;`.
+  - Recommendation: remove the stray whitespace.
+
+- `Assets/Scripts/Actors/Worker/Context/WorkerActionContext.cs`
+  - Issue: commented-out `Owner` code remains without explanation.
+  - Recommendation: remove the dead comment, or replace it with a specific TODO if the owner
+    reference is intentionally deferred.
+
+- `Assets/Scripts/Manager/TickManager.cs`
+  - Issue: serialized fields `slowtick`, `normaltick`, and `fasttick` do not use `_camelCase`.
+  - Recommendation: rename to `_slowTick`, `_normalTick`, `_fastTick` with
+    `[FormerlySerializedAs]` if serialized scene data must be preserved.
+
+- `Assets/Scripts/Enum/ActionState.cs`, `Assets/Scripts/Enum/DestinationType.cs`,
+  `Assets/Scripts/Interface/IAction.cs`, `Assets/Scripts/Interface/ITickable.cs`
+  - Issue: unused `using UnityEngine;`.
+  - Recommendation: remove unused usings.
+
+- `Assets/Scripts/Enum/TickType.cs`
+  - Issue: `TickType.Custom` is defined but not handled in `TickManager.GetTickers()` and has no
+    current callers.
+  - Recommendation: remove `Custom` or implement/document its behavior.
 
 ## Findings By File
 
 ### `Assets/Scripts/Actors/Worker/WorkerAI.cs`
 
-- `[SerializeField]` fields `actionSelectorSource`, `movementStats`, `tickManager`,
-  `statsTickType` do not use the `_camelCase` prefix required for private serialized fields
-  (CodeConvention "Field Style"). Suggested: `_actionSelectorSource`, `_movementStats`,
-  `_tickManager`, `_statsTickType`.
-- `//private void OnEnable() => tickManager?.RegisterTick(statsTickType, stats);` is commented
-  out with no explanation. Compare with the `SetAction(...)` commented block just below it,
-  which has an explanatory comment justifying why it is disabled (CodeConvention "Comments").
-  This line should either get a similar explanation or be removed.
-- `Awake()` directly constructs `WorkerStats`, `WorkerMover`, and `WorkerActionContext`, and
-  `statsTickType` is currently unused, and `TickManager` registration is commented out. These
-  are **already documented** in ProjectStructure.md "Known Design Notes" / "Current note" —
-  not new issues, listed here only for completeness.
-
-### `Assets/Scripts/Actors/Worker/WorkerDefaultActionSelector.cs`
-
-- `[SerializeField]` fields `actionSet`, `destinationProvider` do not use the `_camelCase`
-  prefix (CodeConvention "Field Style"). Suggested: `_actionSet`, `_destinationProvider`.
-- The threshold value `70f` is repeated 3 times in `TrySelectAction` (thirst, hunger, fatigue
-  checks). CodeConvention "Field Style" recommends `const`/`static readonly` for fixed values
-  repeated across methods. Suggested: `private const float NeedThreshold = 70f;`.
-
-### `Assets/Scripts/Actors/Worker/Context/WorkerStats.cs`
-
-- `MIN_HUNGER_VAL`, `MAX_HUNGER_VAL`, `MIN_THIRST_VAL`, `MAX_THIRST_VAL`, `MIN_FATIGUE_VAL`,
-  `MAX_FATIGUE_VAL` are declared `private readonly float ... = <literal>`. These never change
-  after being set, so CodeConvention "Field Style" suggests `const` instead of `readonly`, and
-  PascalCase naming (e.g. `MinHungerVal`) instead of `ALL_CAPS`.
-- `Work(float amount)` (single-parameter overload, `Fatigue += amount`) does not appear to be
-  called anywhere; `WorkAction` calls the 3-parameter `Work(hunger, thirst, fatigue)` overload
-  instead. Verify usage and remove if dead.
-
-### `Assets/Scripts/Actors/Worker/Context/WorkerMover.cs`
-
-- `TickMove()`: `if (target == null || movementStats == null || ...)` — `target` is a
-  `Transform` and `movementStats` is a `WorkerMovementStats : MonoBehaviour`, both
-  `UnityEngine.Object` types. CodeConvention "Null Checks" recommends Unity-style truthiness:
-  `if (!target || !movementStats || ...)`.
-- `MoveTo(Vector3, Vector3)`: `if (target == null) return;` — same issue, should be
-  `if (!target) return;`.
-- `MoveTo(Vector3, Vector3)` does not appear to be called from `MoveAction` or any reviewed
-  Behavior Graph node (only `StartMove`/`TickMove`/`Stop` are used). Verify usage and remove if
-  dead.
-
-### `Assets/Scripts/Actors/Worker/Context/WorkerActionContext.cs`
-
-- `//public WorkerAI Owner { get; }` and `//Owner = owner;` are commented-out code with no
-  explanation (CodeConvention "Comments": comments should explain non-obvious reasons; dead
-  code without a reason should be removed or annotated with a TODO).
-
-### `Assets/Scripts/Actors/Worker/Context/WorkerMovementStats.cs`
-
-- No issues found. `_moveSpeed` / `_stoppingDistance` (`_camelCase` serialized fields) and
-  `const` usage for `MinMoveSpeed` / `MinStoppingDistance` match CodeConvention.
-
-### `Assets/Scripts/Actors/Worker/WorkerActionPlan.cs`
-
-- No issues found. Matches the "Plan Ownership" rules in CodeConvention and the
-  `WorkerActionPlan` role description in ProjectStructure.md.
-
-### `Assets/Scripts/Actors/Worker/WorkerActionSet.cs`
-
-- No issues found. Manual registration in `Awake()` is a documented limitation in
-  ProjectStructure.md, not a new issue.
-
-### `Assets/Scripts/Actors/Worker/Actions/EatAction.cs`
-
-- `private float _timer = 2f;` — this is a private runtime field (not `[SerializeField]`), and
-  uses the `_camelCase` style, while `DrinkAction.timer` and `WorkAction.timer` (also private
-  runtime fields) use plain `camelCase` without the underscore. Naming should be consistent
-  across the four action files (see "Cross-Cutting Findings" below for the underlying
-  ambiguity).
-- The literal `2f` appears twice (field initializer and inside `Start()`), where the field
-  initializer is redundant since `Start()` always resets it. Consider a single
-  `private const float Duration = 2f;`.
-
-### `Assets/Scripts/Actors/Worker/Actions/RestAction.cs`
-
-- `private float _timer;` — same naming inconsistency as `EatAction` (compare
-  `DrinkAction.timer` / `WorkAction.timer`, which use no underscore).
-
-### `Assets/Scripts/Actors/Worker/Actions/DrinkAction.cs`
-
-- Line 1 has a stray leading space before `using UnityEngine;`. Minor formatting issue.
-
-### `Assets/Scripts/Actors/Worker/Actions/MoveAction.cs`
-
-- No issues found. Null checks on `context`/`context.Mover` (plain C# types) correctly use
-  `== null` / `?.`; `Start`/`Tick`/`Cancel` and per-run state reset match
-  CodeConvention "Action Rules".
-
-### `Assets/Scripts/Actors/Worker/Actions/WorkAction.cs`
-
-- `context.Stats.Work(10f, 10f, 20f)` uses three magic numbers, but only in one place — lower
-  priority than the repeated values noted elsewhere. Consider named constants for readability
-  if these values are tuned later.
-
-### `Assets/Scripts/Provider/DestinationProvider.cs`
-
-- `TryGetDestinationPosition`: `if (info.ActionType != actionType || info.Destination == null)`
-  — `info.Destination` is a `GameObject` (`UnityEngine.Object`). CodeConvention "Null Checks"
-  recommends `!info.Destination` instead of `info.Destination == null`.
-- `DestinationInfo.Destination` / `DestinationInfo.ActionType` are public fields on a
-  `[Serializable]` data class. CodeConvention "Unity" prefers `[SerializeField] private` for
-  Inspector fields, though public fields on plain serializable data holders (not
-  `MonoBehaviour`) are common Unity practice — flagged as a minor consistency note only.
-
-### `Assets/Scripts/Manager/TickManager.cs`
-
-- `[SerializeField]` fields `slowtick`, `normaltick`, `fasttick` do not use the `_camelCase`
-  prefix (CodeConvention "Field Style"). Suggested: `_slowTick`, `_normalTick`, `_fastTick`.
-
-### `Assets/Scripts/Interface/ITickable.cs`
-
-- `using UnityEngine;` is present but no UnityEngine type is referenced in this file. Unused
-  using directive.
-
-### `Assets/Scripts/Enum/ActionState.cs`
-
-- `using UnityEngine;` is present but no UnityEngine type is referenced. Unused using
-  directive.
-
-### `Assets/Scripts/Enum/ActionType.cs`
-
-- No issues found.
-
-### `Assets/Scripts/Enum/DestinationType.cs`
-
-- `using UnityEngine;` is present but no UnityEngine type is referenced. Unused using
-  directive.
-- This enum is already noted in ProjectStructure.md "Known Design Notes" (line ~545) as stale:
-  "current destination lookup is based on `ActionType`" rather than `DestinationType`. This
-  review confirms `DestinationType` is not referenced by `DestinationProvider` or any
-  reviewed selector/action. Candidate for removal, pending confirmation it is truly unused
-  project-wide.
-- Declared in namespace `ProviderEnum`, while sibling files `ActionState.cs` / `ActionType.cs`
-  in the same `Assets/Scripts/Enum` folder use namespace `WorkerEnum`. See "Cross-Cutting
-  Findings" below.
-
-### `Assets/Scripts/Enum/TickType.cs`
-
-- No namespace declared, while sibling enums in the same folder use `WorkerEnum` or
-  `ProviderEnum`. See "Cross-Cutting Findings" below.
-
-### `Assets/Scripts/Interface/IAction.cs`
-
-- `public ActionType ActionType { get; }` — the explicit `public` modifier on an interface
-  member is redundant (interface members are implicitly public). Minor style note, not a
-  functional issue.
-
-### `Assets/Scripts/Interface/IActionSelector.cs`
-
-- No issues found. Genuinely shared role contract (implemented by
-  `WorkerDefaultActionSelector`, referenced by `WorkerAI` and Behavior Graph nodes).
-
-### `Assets/Scripts/Interface/IActionSet.cs`
-
-- `IActionSet<TKey>` currently has only one implementer (`WorkerActionSet`). CodeConvention
-  "Interfaces" advises against one-to-one interfaces for a single concrete class unless there
-  is a concrete need (e.g. testing/mocking). Not necessarily wrong — flagged for awareness only.
+- `TryEnsureCurrentAction()` is an acceptable consolidation of existing behavior. `WorkerAI`
+  still asks the selector for a plan, but this was already part of its documented lifecycle and
+  does not move selection policy into `WorkerAI`.
+- The Behavior Graph ensure node now has a safe public entry point without reading selector or
+  action-set internals.
+- Minor style note: the newly added explanatory comments are useful, but production code should
+  keep comments concise and encoding-stable.
 
 ### `Assets/BehaviorGraph/CustomActionNode/EnsureWorkerHasActionNode.cs`
 
-- `GetActionSelector()` duplicates the same `MonoBehaviour[]` component-scan logic as
-  `WorkerAI.FindActionSelector()`. Not a strict CodeConvention violation, but a duplication
-  worth considering for a shared helper if more call sites appear.
-
-### `Assets/BehaviorGraph/CustomActionNode/MoveToPlanDestinationNode.cs`
-
-- `OnUpdate()`: `if (workerAI == null && !GameObject.TryGetComponent(out workerAI))` —
-  `workerAI` is a `WorkerAI : MonoBehaviour` (`UnityEngine.Object`). CodeConvention
-  "Null Checks" recommends `if (!workerAI && !GameObject.TryGetComponent(out workerAI))`.
-- `ReturnPlanActions()`: `if (!actionSet || plan == null)` correctly mixes Unity-style
-  truthiness (`!actionSet`, a `MonoBehaviour`) with an explicit null check (`plan == null`, a
-  plain `WorkerActionPlan`) — listed here as a **correct example**, not an issue.
-- This node creates and runs a `WorkerActionPlan` directly rather than going through
-  `WorkerAI.SetPlan` / `TickCurrentAction` (unlike `EnsureWorkerHasActionNode` /
-  `RunWorkerCurrentActionNode`). This asymmetry is explicitly described in
-  ProjectStructure.md (lines ~410-411) as the intended bridging behavior for this node — not
-  flagged as a violation.
+- Previous High finding is resolved. The node now depends only on `WorkerAI` and delegates action
+  selection/plan assignment through `TryEnsureCurrentAction()`.
+- This aligns better with the bridge role: the node no longer scans for selectors or action sets.
 
 ### `Assets/BehaviorGraph/CustomActionNode/RunWorkerCurrentActionNode.cs`
 
-- No issues found. Thin bridge matching its ProjectStructure.md role description exactly.
+- No issues found. It remains a thin bridge over `WorkerAI.TickCurrentAction()`.
 
----
+### `Assets/BehaviorGraph/CustomActionNode/MoveToPlanDestinationNode.cs`
+
+- The file was deleted. This removes the prior action-set lookup and direct context plan-setting
+  defects.
+- `FarmerGraph.asset` currently has no reference to this node, so the deletion appears safe from
+  the checked serialized graph data.
+- `ProjectStructure.md` still needs to be updated to match the deletion.
+
+### `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
+
+- Correctly does not require worker prefabs to own `WorkerActionSet`.
+- Correctly resolves selector-side `WorkerActionSet` for selectors that implement
+  `IWorkerActionSelectorSetup`.
+- Cleanup remains: several debug logs should be removed or gated before production-like use.
+
+### `Assets/Scripts/Actors/Worker/WorkerDefaultActionSelector.cs`
+
+- Role remains clean: it decides intent and builds plans, while actions execute.
+- `CriticalThreshold` and `PrepareThreshold` are named constants.
+- Future predictive work-capacity logic should continue using `WorkerActionResultStatData`
+  through `WorkerActionSet`, not concrete action classes.
+
+### `Assets/Scripts/Actors/Worker/WorkerActionSet.cs`
+
+- Pooling and data-backed action creation remain in the right place.
+- Manual action registration remains a documented limitation.
+- The implemented interface is still too narrow for actual selector usage.
+
+### `Assets/Scripts/Actors/Worker/Actions/*.cs`
+
+- Work/Eat/Drink/Rest still avoid hardcoded duration/stat effect values.
+- `MoveAction` still contains a normal-flow debug log.
+- Empty `Cancel()` bodies on timer actions are acceptable because those actions hold no external
+  resources yet.
+
+### `Assets/Scripts/Actors/Worker/Data/*.cs`
+
+- Data responsibility remains clean: ScriptableObject lookup and serializable value objects only.
+- Future improvement: add editor validation for duplicate `ActionType` entries or missing
+  required entries.
+
+### `Assets/Scripts/Actors/Worker/Context/*.cs`
+
+- `WorkerStats.Apply(WorkerStatDelta)` remains a clean generic stat mutation point.
+- `WorkerMover` still has null-check style, field naming, and dead method cleanup items.
+- `WorkerActionContext` still has stale commented-out owner code.
+
+### `Assets/Scripts/Provider/DestinationProvider.cs`
+
+- Role is correct: destination lookup only.
+- Needs null handling and field-style cleanup.
 
 ## Cross-Cutting Findings
 
-### 1. Folder structure vs. ProjectStructure.md
+- Behavior Graph High-risk ownership drift is currently resolved for checked assets because the
+  broken direct movement bridge is gone and the ensure node routes through `WorkerAI`.
+- Documentation drift now matters: `ProjectStructure.md` still describes the deleted direct move
+  node.
+- Namespace policy remains inconsistent. `ActionState` and `ActionType` use `WorkerEnum`,
+  `DestinationType` uses `ProviderEnum`, `TickType` has no namespace, and most worker scripts
+  have no namespace.
+- `DestinationType` is still stale because destination lookup is `ActionType` based.
+- `ActionType.Sleep` is still defined but no action is registered for it.
+- `TickType.Custom` is still defined but not implemented as a distinct tick bucket.
+- `FarmerAI.prefab` should not own `WorkerActionSet`; checked serialized references still place
+  `WorkerActionSet` on the selector setup in `SampleScene`, matching current architecture.
 
-ProjectStructure.md's "File Structure" section lists `WorkerActionContext.cs`,
-`WorkerMover.cs`, `WorkerStats.cs`, and `WorkerMovementStats.cs` directly under
-`Assets/Scripts/Actors/Worker/`. In the actual codebase, these four files live under
-`Assets/Scripts/Actors/Worker/Context/`. Either the document should be updated to reflect the
-`Context/` subfolder, or the files should be moved to match the document — whichever the team
-intends as the source of truth.
+## Positive Notes
 
-### 2. Namespace usage is inconsistent
+- The latest bridge change reduced dependencies in `EnsureWorkerHasActionNode`.
+- Removing `MoveToPlanDestinationNode` eliminated a concrete plan ownership violation.
+- `WorkerAI` remains close to the documented execution/lifecycle role.
+- `WorkerActionResultStatData` continues to provide a single source of truth for action duration
+  and stat deltas.
+- `WorkerActionPlan` remains simple and does not accumulate behavior logic.
+- `WorkerMovementStats` follows serialized field naming and clamps exposed values with named
+  constants.
 
-- `Assets/Scripts/Enum/ActionState.cs` and `ActionType.cs` use namespace `WorkerEnum`.
-- `Assets/Scripts/Enum/DestinationType.cs` (same folder) uses namespace `ProviderEnum`.
-- `Assets/Scripts/Enum/TickType.cs` (same folder) has **no namespace**.
-- All Worker-domain classes (`WorkerAI`, `WorkerActionContext`, `WorkerActionPlan`,
-  `WorkerActionSet`, `WorkerDefaultActionSelector`, `WorkerStats`, `WorkerMover`,
-  `WorkerMovementStats`, and all five `IAction` implementations), all four interfaces, and
-  `TickManager` / `DestinationProvider` have **no namespace**.
+## Recommended Next Actions
 
-CodeConvention "Namespaces" says to use namespaces consistently once a domain has enough
-scripts to benefit from them. The Worker domain has well over a dozen files with no namespace
-at all, while three small enum files in the same folder use two different namespaces between
-them. This is worth a deliberate decision (e.g., introduce a `Worker` namespace for the
-domain, and/or unify the enum namespaces) rather than leaving it as incidental drift.
-
-### 3. `_camelCase` naming for `[SerializeField]` private fields
-
-CodeConvention "Field Style" specifies `_camelCase` for private fields, including private
-serialized fields. The following serialized fields do not follow this:
-
-- `WorkerAI.cs`: `actionSelectorSource`, `movementStats`, `tickManager`, `statsTickType`
-- `WorkerDefaultActionSelector.cs`: `actionSet`, `destinationProvider`
-- `TickManager.cs`: `slowtick`, `normaltick`, `fasttick`
-
-Correctly-named examples for comparison: `WorkerMovementStats._moveSpeed` /
-`_stoppingDistance`, `WorkerActionSet._initialPoolSize`, `DestinationProvider._destinationInfos`.
-
-### 4. Private runtime field naming: `_timer` vs `timer`
-
-- `EatAction.cs` and `RestAction.cs` use `_timer` (with underscore).
-- `DrinkAction.cs` and `WorkAction.cs` use `timer` (no underscore).
-
-Both are private runtime fields (not `[SerializeField]`). CodeConvention has two relevant
-lines that read slightly differently — the "Naming" section (line ~9) describes private
-runtime fields as plain `camelCase` and reserves `_camelCase` for Inspector-configured
-serialized fields, while the "Field Style" section (line ~94) describes `_camelCase` as
-covering "private fields, including private serialized fields" without explicitly excluding
-non-serialized runtime fields. Because the existing code itself is split 2-vs-2 on this point,
-this is reported as an inconsistency to resolve with a single explicit rule, rather than as a
-violation of one specific line.
-
-### 5. Repeated magic numbers
-
-- `70f` — repeated 3 times in `WorkerDefaultActionSelector.TrySelectAction` (thirst, hunger,
-  fatigue thresholds).
-- `50f` — used once each in `EatAction.Tick` (`Stats.Eat(50f)`), `DrinkAction.Tick`
-  (`Stats.Drink(50f)`), and `RestAction.Tick` (`Stats.Rest(50f)`) — same value repeated across
-  three files/methods.
-- `2f` — used twice within `EatAction.cs` (field initializer and `Start()`).
-
-CodeConvention "Field Style" recommends `const` / `static readonly` for such fixed, repeated
-values.
-
-### 6. Unused `using UnityEngine;`
-
-`ITickable.cs`, `ActionState.cs`, and `DestinationType.cs` each have `using UnityEngine;` but
-do not reference any UnityEngine type.
-
-### 7. Possible dead code (verify before removing)
-
-- `WorkerMover.MoveTo(Vector3, Vector3)` — not called by `MoveAction` or any reviewed
-  Behavior Graph node.
-- `WorkerStats.Work(float amount)` (single-parameter overload) — not called by `WorkAction`,
-  which uses the 3-parameter overload instead.
-- `Assets/Scripts/Enum/DestinationType.cs` — already flagged as stale in
-  ProjectStructure.md; this review found no reference to it in `DestinationProvider` or any
-  reviewed selector/action.
-- `ActionType.Sleep` — defined in the enum but not handled in
-  `WorkerActionSet.CreateAction` / `RegisterPool` (no corresponding action is registered for
-  it).
-
----
-
-## Items Already Documented in ProjectStructure.md (not new findings)
-
-Listed here only so this document is self-contained; no action implied beyond what
-ProjectStructure.md already states:
-
-- `WorkerAI.Awake()` directly constructs `WorkerStats`, `WorkerMover`, and
-  `WorkerActionContext` — marked as temporary, pending a factory/manager.
-- `WorkerAI.statsTickType` is currently unused except for planned `TickManager` integration.
-- `TickManager` registration from `WorkerAI` is commented out.
-- `Assets/Scripts/Enum/DestinationType.cs` still exists despite destination lookup being
-  `ActionType`-based.
-- `DestinationProvider` stores `GameObject` references; `Transform` may be cleaner if only
-  position is needed.
-
----
-
-## Summary
-
-- **Naming convention fixes**: 9 `[SerializeField]` fields missing `_camelCase` prefix across
-  `WorkerAI.cs`, `WorkerDefaultActionSelector.cs`, `TickManager.cs`; `_timer`/`timer`
-  inconsistency between `EatAction`/`RestAction` and `DrinkAction`/`WorkAction`;
-  `WorkerStats` `MIN_*`/`MAX_*` constants should be `const` + PascalCase.
-- **Null-check style fixes**: 4 locations using `== null` on `UnityEngine.Object` types that
-  should use `!x` (`WorkerMover.TickMove`, `WorkerMover.MoveTo`,
-  `DestinationProvider.TryGetDestinationPosition`, `MoveToPlanDestinationNode.OnUpdate`).
-- **Cleanup candidates**: unused `using UnityEngine;` in 3 files; unexplained commented-out
-  code in `WorkerActionContext.cs` and `WorkerAI.cs`; possibly-dead `WorkerMover.MoveTo`,
-  `WorkerStats.Work(float)`, `DestinationType.cs`, `ActionType.Sleep`.
-- **Repeated magic numbers**: `70f` (x3), `50f` (x3 across files), `2f` (x2 in one file) —
-  candidates for `const`.
-- **Documentation drift**: `Context/` subfolder not reflected in ProjectStructure.md's file
-  tree; namespace usage (`WorkerEnum` / `ProviderEnum` / no namespace) is inconsistent across
-  the Enum folder and the Worker domain.
+1. Update `PublicMD/ProjectStructure.md` to remove or mark the deleted `MoveToPlanDestinationNode`.
+2. Clean up `DestinationProvider` null handling and field style.
+3. Normalize `WorkerMover` null checks, field names, and remove the unused `MoveTo` overload.
+4. Convert `WorkerStats` bounds to `private const float Min...` names.
+5. Remove or gate normal-flow debug logs in `WorkerAIManager` and `MoveAction`.
+6. Fix `TickManager` serialized field names with `[FormerlySerializedAs]` if needed.
+7. Decide namespace policy for the worker domain and enum folder.
+8. Verify or remove stale `DestinationType`, `ActionType.Sleep`, `TickType.Custom`, and the
+   currently too-narrow `IActionSet<TKey>`.

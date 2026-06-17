@@ -13,36 +13,12 @@ using Action = Unity.Behavior.Action;
 )]
 public partial class EnsureWorkerHasActionNode: Action
 {
+    // WorkerAI 한 곳만 의존한다. selector/WorkerActionSet 참조를 직접 탐색하지 않는다.
     protected override Status OnStart()
     {
-        if (GameObject.TryGetComponent<WorkerAI>(out var workerAI))
-        {
-            if (workerAI.HasCurrentAction)
-                return Status.Success;
-
-            IActionSelector<WorkerActionContext, WorkerActionPlan> selector = GetActionSelector();
-            if (selector == null)
-                return Status.Failure;
-
-            if (!selector.TrySelectAction(workerAI.Context, out WorkerActionPlan plan))
-                return Status.Failure;
-
-            workerAI.SetPlan(plan);
-            return Status.Success;
-        }
+        if (GameObject.TryGetComponent(out WorkerAI workerAI))
+            return workerAI.TryEnsureCurrentAction() ? Status.Success : Status.Failure;
 
         return Status.Failure;
-    }
-
-    private IActionSelector<WorkerActionContext, WorkerActionPlan> GetActionSelector()
-    {
-        MonoBehaviour[] components = GameObject.GetComponents<MonoBehaviour>();
-        for (int i = 0; i < components.Length; i++)
-        {
-            if (components[i] is IActionSelector<WorkerActionContext, WorkerActionPlan> selector)
-                return selector;
-        }
-
-        return null;
     }
 }
