@@ -8,6 +8,7 @@ public class WorkerAIManager : MonoBehaviour
     [SerializeField] private Transform _workerParent;
     [SerializeField] private Transform[] _spawnPoints;
     [SerializeField] private WorkerInitialStats _initialStats = new WorkerInitialStats();
+    [SerializeField] private WorkerInitialCarryStorage _initialCarryStorage = new WorkerInitialCarryStorage();
     [SerializeField] private WorkerSelectorType _initialSelectorType = WorkerSelectorType.Default;
     [SerializeField] private List<WorkerSelectorEntry> _selectorEntries = new List<WorkerSelectorEntry>();
 
@@ -101,8 +102,11 @@ public class WorkerAIManager : MonoBehaviour
             _initialStats.Hunger,
             _initialStats.Thirst,
             _initialStats.Fatigue);
+        WorkerCarryStorage carryStorage = new WorkerCarryStorage(
+            _initialCarryStorage.InitialWheat,
+            _initialCarryStorage.MaxWheat);
         WorkerMover mover = new WorkerMover(worker.transform, movementStats);
-        WorkerActionContext context = new WorkerActionContext(worker.transform, mover, stats, movementStats);
+        WorkerActionContext context = new WorkerActionContext(worker.transform, mover, stats, movementStats, carryStorage);
 
         worker.Init(context, actionSelector);
         return true;
@@ -182,4 +186,14 @@ public class WorkerInitialStats
     public float Hunger => _hunger;
     public float Thirst => _thirst;
     public float Fatigue => _fatigue;
+}
+
+[Serializable]
+public class WorkerInitialCarryStorage
+{
+    [SerializeField] private int _initialWheat;
+    [SerializeField] private int _maxWheat = 5;
+
+    public int InitialWheat => _initialWheat;
+    public int MaxWheat => _maxWheat;
 }

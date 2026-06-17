@@ -9,5 +9,6 @@ namespace WorkerEnum
         Sleep,
         Rest,
         Move,
+        DepositWheat,
     }
 }

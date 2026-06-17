@@ -1,14 +1,14 @@
 using UnityEngine;
 using WorkerEnum;
 
-public class WorkAction : IAction
+public class DepositWheatAction : IAction
 {
     private readonly WorkerActionResultStatEntry resultStatEntry;
     private float timer;
 
-    public ActionType ActionType => ActionType.Work;
+    public ActionType ActionType => ActionType.DepositWheat;
 
-    public WorkAction(WorkerActionResultStatEntry resultStatEntry)
+    public DepositWheatAction(WorkerActionResultStatEntry resultStatEntry)
     {
         this.resultStatEntry = resultStatEntry;
     }
@@ -26,7 +26,7 @@ public class WorkAction : IAction
             return ActionState.Running;
 
         context.Stats.Apply(resultStatEntry.StatDelta);
-        context.CarryStorage.AddWheat(resultStatEntry.WheatDelta);
+        context.CarryStorage.DepositAllWheat();
         return ActionState.Success;
     }
 

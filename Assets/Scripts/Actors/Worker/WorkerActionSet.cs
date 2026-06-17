@@ -17,6 +17,7 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
         RegisterPool(ActionType.Drink);
         RegisterPool(ActionType.Work);
         RegisterPool(ActionType.Move);
+        RegisterPool(ActionType.DepositWheat);
     }
 
     public bool TryGetAction(ActionType actionType, out IAction action)
@@ -116,6 +117,9 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
                 : null,
             ActionType.Work => TryGetResultStatEntry(actionType, out WorkerActionResultStatEntry workEntry)
                 ? new WorkAction(workEntry)
+                : null,
+            ActionType.DepositWheat => TryGetResultStatEntry(actionType, out WorkerActionResultStatEntry depositWheatEntry)
+                ? new DepositWheatAction(depositWheatEntry)
                 : null,
             ActionType.Move => new MoveAction(),
             _ => null

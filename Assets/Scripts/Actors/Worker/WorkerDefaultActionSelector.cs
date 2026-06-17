@@ -42,6 +42,9 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
         if (TryGetNeededActionType(context, CriticalThreshold, out ActionType actionType))
             return TryCreatePlan(context, actionType, out plan);
 
+        if (context.CarryStorage.IsWheatFull)
+            return TryCreatePlan(context, ActionType.DepositWheat, out plan);
+
         if (TryGetNeededActionType(context, PrepareThreshold, out actionType))
             return TryCreatePlan(context, actionType, out plan);
 

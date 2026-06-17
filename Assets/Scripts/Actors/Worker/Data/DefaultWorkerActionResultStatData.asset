@@ -19,21 +19,32 @@ MonoBehaviour:
       _hunger: 10
       _thirst: 10
       _fatigue: 20
+    _wheatDelta: 1
   - _actionType: 1
     _duration: 2
     _statDelta:
       _hunger: -50
       _thirst: 0
       _fatigue: 0
+    _wheatDelta: 0
   - _actionType: 2
     _duration: 1.5
     _statDelta:
       _hunger: 0
       _thirst: -50
       _fatigue: 0
+    _wheatDelta: 0
   - _actionType: 4
     _duration: 1.5
     _statDelta:
       _hunger: 0
       _thirst: 0
       _fatigue: -50
+    _wheatDelta: 0
+  - _actionType: 6
+    _duration: 1.5
+    _statDelta:
+      _hunger: 0
+      _thirst: 0
+      _fatigue: 0
+    _wheatDelta: 0

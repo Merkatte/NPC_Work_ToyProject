@@ -11,6 +11,7 @@ The current project is a Unity 2D worker/NPC behavior prototype. The core design
 - queued action runtime flow: `WorkerActionPlan`
 - worker capabilities: `WorkerActionContext`
 - worker action result tuning: `WorkerActionResultStatData`
+- worker carry state: `WorkerCarryStorage`
 - scene destination lookup: providers, consumed by selectors
 - low-level movement/stat logic: worker capability classes
 
@@ -36,12 +37,14 @@ Assets/
         WorkerSelectorType.cs
         Actions/
           DrinkAction.cs
+          DepositWheatAction.cs
           EatAction.cs
           MoveAction.cs
           RestAction.cs
           WorkAction.cs
         Context/
           WorkerActionContext.cs
+          WorkerCarryStorage.cs
           WorkerMovementStats.cs
           WorkerMover.cs
           WorkerStats.cs
@@ -140,10 +143,11 @@ Currently registered actions:
 - `DrinkAction`
 - `WorkAction`
 - `MoveAction`
+- `DepositWheatAction`
 
 Because actions may be reused, every action with runtime state must reset that state in `Start()`. For example, timer-based actions reset their timers in `Start()`.
 
-Stat-result actions should not hardcode duration, cost, or reward values. They read their injected result entry and apply its `WorkerStatDelta` to `WorkerStats` on completion.
+Stat-result actions should not hardcode duration, cost, or reward values. They read their injected result entry and apply its `WorkerStatDelta` to `WorkerStats` on completion. `WorkAction` also reads the injected wheat delta and adds it through `WorkerCarryStorage`.
 
 ### Destination-Based Movement
 
@@ -170,7 +174,7 @@ Role:
 - Owns selector templates and chooses which selector type to inject.
 - Creates a worker-specific selector instance from the selected template.
 - Resolves the selector-side `WorkerActionSet` from the selector template instance and injects it into selectors that require setup.
-- Creates `WorkerStats`, `WorkerMover`, and `WorkerActionContext`.
+- Creates `WorkerStats`, `WorkerCarryStorage`, `WorkerMover`, and `WorkerActionContext`.
 - Injects the runtime context and selector into `WorkerAI`.
 - Tracks spawned worker instances.
 
@@ -212,7 +216,7 @@ File: `Assets/Scripts/Actors/Worker/Context/WorkerActionContext.cs`
 Role:
 
 - Provides actions with access to worker capabilities and state.
-- Contains `Transform`, `WorkerMover`, `WorkerStats`, `WorkerMovementStats`, and the current `WorkerActionPlan`.
+- Contains `Transform`, `WorkerMover`, `WorkerStats`, `WorkerMovementStats`, `WorkerCarryStorage`, and the current `WorkerActionPlan`.
 
 Should not:
 
@@ -262,9 +266,9 @@ Role:
 
 Current priority:
 
-1. If thirst is high, queue move-to-drink-destination then drink, or drink immediately if already there.
-2. If hunger is high, queue move-to-eat-destination then eat, or eat immediately if already there.
-3. If fatigue is high, queue move-to-rest-destination then rest, or rest immediately if already there.
+1. If thirst, hunger, or fatigue is critical, queue the matching recovery action with movement if needed.
+2. If carried wheat is full, queue move-to-warehouse then deposit wheat, or deposit immediately if already there.
+3. If thirst, hunger, or fatigue is at the prepare threshold, queue the matching recovery action with movement if needed.
 4. Otherwise, queue move-to-work-destination then work, or work immediately if already there.
 
 Should not:
@@ -339,7 +343,7 @@ Should not:
 - Choose destination type by itself.
 - Create new plans.
 
-### EatAction, DrinkAction, RestAction, WorkAction
+### EatAction, DrinkAction, RestAction, WorkAction, DepositWheatAction
 
 Files:
 
@@ -347,6 +351,7 @@ Files:
 - `DrinkAction.cs`
 - `RestAction.cs`
 - `WorkAction.cs`
+- `DepositWheatAction.cs`
 
 Role:
 
@@ -355,6 +360,8 @@ Role:
 - Return `Running` while timer remains.
 - Apply their injected `WorkerStatDelta` to `WorkerStats` on completion.
 - Return `Success` after applying effect.
+- `WorkAction` adds the injected wheat delta to `WorkerCarryStorage` on completion.
+- `DepositWheatAction` clears carried wheat through `WorkerCarryStorage` on completion.
 
 Current stat effects live in `WorkerActionResultStatData`:
 
@@ -362,6 +369,8 @@ Current stat effects live in `WorkerActionResultStatData`:
 - Drink reduces thirst.
 - Rest reduces fatigue.
 - Work increases hunger, thirst, and fatigue.
+- Work adds wheat to carried wheat.
+- DepositWheat clears carried wheat at the warehouse destination.
 
 They should not:
 
@@ -380,7 +389,7 @@ Files:
 Role:
 
 - ScriptableObject database for worker action result tuning.
-- Maps `ActionType` to duration and `WorkerStatDelta`.
+- Maps `ActionType` to duration, `WorkerStatDelta`, and wheat delta.
 - Provides one source of truth for both action execution and selector prediction.
 
 Should not:
@@ -406,6 +415,22 @@ Should not:
 - Decide what action to take.
 - Know about selectors, actions, destinations, or movement.
 - Know action-specific cost or reward numbers.
+
+### WorkerCarryStorage
+
+File: `Assets/Scripts/Actors/Worker/Context/WorkerCarryStorage.cs`
+
+Role:
+
+- Owns the worker's carried wheat amount.
+- Clamps carried wheat to the configured capacity.
+- Provides `IsWheatFull` for selectors and add/deposit methods for actions.
+
+Should not:
+
+- Decide when to work or deposit.
+- Know destination lookup or selector priority.
+- Hardcode action reward values.
 
 ### WorkerMover
 
@@ -506,7 +531,7 @@ The intent is that higher-level orchestration depends on role contracts and cont
 ```text
 WorkerAIManager
   instantiates WorkerAI prefab
-  creates WorkerStats / WorkerMover / WorkerActionContext
+  creates WorkerStats / WorkerCarryStorage / WorkerMover / WorkerActionContext
   creates a worker-specific IActionSelector from its selector entries
   injects the selector template's WorkerActionSet into selectors that require setup
   calls WorkerAI.Init(context, selector)
@@ -557,16 +582,25 @@ WorkerMover
 ### Stat Action Dependency Flow
 
 ```text
-EatAction / DrinkAction / RestAction / WorkAction
+EatAction / DrinkAction / RestAction / WorkAction / DepositWheatAction
   use injected WorkerActionResultStatEntry
   use WorkerActionContext.Stats
   call WorkerStats.Apply(entry.StatDelta)
+
+WorkAction
+  calls WorkerCarryStorage.AddWheat(entry.WheatDelta)
+
+DepositWheatAction
+  calls WorkerCarryStorage.DepositAllWheat()
 
 WorkerActionResultStatData
   owns action duration and stat delta tuning
 
 WorkerStats
-  owns clamped stat values
+  owns clamped hunger/thirst/fatigue values
+
+WorkerCarryStorage
+  owns clamped carried wheat values
 ```
 
 ### Behavior Graph Dependency Flow
