@@ -1,7 +1,7 @@
 # PROGRESS
 
 ## Current Status
-Worker action result stat values were separated from action code into ScriptableObject data. WorkerAIManager now resolves WorkerActionSet from the selector template instance instead of requiring worker prefabs to own it. Work now produces carried wheat, and full workers deposit wheat at the warehouse through a separate action.
+The initial DOTween animation domain is implemented. MoveAnim and WorkAnim create reusable looping tweens from an AnimContext containing a visual Transform and horizontal flip request.
 
 ## Completed Tasks
 | Task ID | Date | Summary | Evidence | Related REQs |
@@ -9,6 +9,7 @@ Worker action result stat values were separated from action code into Scriptable
 | IMP-001 | 2026-06-17 | Moved Work/Eat/Drink/Rest duration and stat deltas into WorkerActionResultStatData and injected entries through WorkerActionSet. | `dotnet build Assembly-CSharp.csproj --no-restore` succeeded with 0 warnings and 0 errors. | WorkerAI must remain execution-only; action result stats must be data-owned. |
 | IMP-002 | 2026-06-17 | Updated WorkerAIManager to inject selector-side WorkerActionSet and connected the SampleScene manager to the Default selector template. | `dotnet build Assembly-CSharp.csproj --no-restore` succeeded with 0 warnings and 0 errors; serialized references verified by search. | WorkerAIManager must not require WorkerActionSet on WorkerAI prefabs. |
 | IMP-004 | 2026-06-17 | Added wheat carry reward, warehouse destination, and DepositWheat action selected when carried wheat is full. | `dotnet build Assembly-CSharp.csproj --no-restore` succeeded with 0 warnings and 0 errors; serialized references verified by search. | Work must produce wheat reward; WorkerAI must remain execution-only; deposit must be a separate action. |
+| IMP-005 | 2026-06-19 | Added the initial IAnim contract, animation context/type, MoveAnim hop loop, and WorkAnim squash loop with horizontal flip support. | `dotnet build Assembly-CSharp.csproj --no-restore` succeeded with 0 warnings and 0 errors. | DOTween animations must be isolated behind reusable animation implementations. |
 
 ## In Progress
 | Task ID | Started | Current Step | Remaining Work |
@@ -36,6 +37,11 @@ Worker action result stat values were separated from action code into Scriptable
 | Assets/Scenes/SampleScene.unity | Connected WorkerAIManager to the Default selector template. | Allow selector creation after WorkerActionSet resolution. |
 | Assets/Scripts/Enum/ActionType.cs | Added DepositWheat action type. | Allow action set and destination provider to identify the deposit behavior. |
 | Assets/Scripts/Actors/Worker/Data/WorkerActionResultStatEntry.cs | Added wheat delta to action result data entries. | Keep work reward values in data instead of action code. |
+| Assets/Scripts/Animation/AnimType.cs | Added Move and Work animation identifiers. | Support enum-keyed animation lookup without coupling to action implementations. |
+| Assets/Scripts/Animation/AnimContext.cs | Added visual Transform and FlipX execution parameters. | Give animations only the runtime data required to create their tweens. |
+| Assets/Scripts/Animation/IAnim.cs | Added the shared DOTween animation creation contract. | Allow animation implementations to be registered and invoked through one role. |
+| Assets/Scripts/Animation/MoveAnim.cs | Added a looping local hop with stretch, squash, cleanup, and FlipX preservation. | Provide movement feedback without modifying gameplay movement logic. |
+| Assets/Scripts/Animation/WorkAnim.cs | Added a looping squash pulse with cleanup and FlipX preservation. | Provide reusable visual feedback for work actions. |
 
 ## Implementation Notes
 IMP-001: `WorkerAI` was intentionally left unchanged and does not reference `WorkerActionResultStatData`.
@@ -45,6 +51,8 @@ IMP-002: CSV/provider abstraction was not added yet; `WorkerActionResultStatData
 IMP-003: `WorkerActionSet` remains selector-side. `WorkerAI` and worker prefabs should not own action pools.
 
 IMP-004: `WorkerAI` remains unchanged for wheat and warehouse behavior. The selector only decides that full carried wheat should trigger `DepositWheat`; `WorkAction` and `DepositWheatAction` perform the state changes through `WorkerCarryStorage`.
+
+IMP-005: `IAnim` implementations create and return DOTween tweens but do not own the active tween lifecycle. `AnimContext.Transform` must be a child visual Transform so MoveAnim local-position changes do not compete with WorkerMover on the actor root. FlipX is applied by preserving scale magnitude and changing only the local X scale sign.
 
 ## Blockers
 | ID | Blocking Task | Problem | Required Decision |
@@ -59,6 +67,9 @@ IMP-004: `WorkerAI` remains unchanged for wheat and warehouse behavior. The sele
 | IMP-002 | Serialized reference search | Passed | SampleScene manager has Default selector entry; selector template has WorkerActionSet with result stat data. |
 | IMP-004 | Command-line C# build | Passed | 0 warnings, 0 errors. |
 | IMP-004 | Serialized reference search | Passed | DepositWheat action type, result data entry, destination mapping, and initial carry storage were found. |
+| IMP-005 | Command-line C# build | Passed | DOTween reference resolved; 0 warnings and 0 errors. |
+| IMP-005 | Static implementation check | Passed | MoveAnim and WorkAnim use local Transform properties, preserve FlipX through the X scale sign, and reset modified values when killed. |
 
 ## Next Actions
-1. Add debug/UI visibility for carried wheat and deposited wheat if gameplay tuning needs runtime inspection.
+1. Add an animation controller/set that registers IAnim implementations by AnimType and owns the active Tween lifecycle.
+2. Connect action start/completion/cancellation to animation requests after the controller ownership is approved.
