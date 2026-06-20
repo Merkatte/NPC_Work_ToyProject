@@ -1,3 +1,4 @@
+using GameAnimation;
 using UnityEngine;
 
 public sealed class WorkerActionContext
@@ -8,6 +9,7 @@ public sealed class WorkerActionContext
     public WorkerStats Stats { get; }
     public WorkerMovementStats MovementStats { get; }
     public WorkerCarryStorage CarryStorage { get; }
+    public IAnimPlayer Animation { get; }
     public WorkerActionPlan Plan { get; private set; }
 
     public WorkerActionContext(
@@ -15,7 +17,8 @@ public sealed class WorkerActionContext
         WorkerMover mover,
         WorkerStats stats,
         WorkerMovementStats movementStats,
-        WorkerCarryStorage carryStorage)
+        WorkerCarryStorage carryStorage,
+        IAnimPlayer animation)
     {
         //Owner = owner;
         Transform = transform;
@@ -23,6 +26,7 @@ public sealed class WorkerActionContext
         Stats = stats;
         MovementStats = movementStats;
         CarryStorage = carryStorage;
+        Animation = animation;
     }
 
     public void SetPlan(WorkerActionPlan plan)

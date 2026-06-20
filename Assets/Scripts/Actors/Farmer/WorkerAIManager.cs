@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using GameAnimation;
 using UnityEngine;
 
 public class WorkerAIManager : MonoBehaviour
@@ -13,8 +14,14 @@ public class WorkerAIManager : MonoBehaviour
     [SerializeField] private List<WorkerSelectorEntry> _selectorEntries = new List<WorkerSelectorEntry>();
 
     private readonly List<WorkerAI> workers = new List<WorkerAI>();
+    private IAnimSet animSet;
 
     public IReadOnlyList<WorkerAI> Workers => workers;
+
+    private void Awake()
+    {
+        animSet = new AnimSet();
+    }
 
     private void Start()
     {
@@ -98,6 +105,13 @@ public class WorkerAIManager : MonoBehaviour
             return false;
         }
 
+        SpriteRenderer spriteRenderer = worker.GetComponentInChildren<SpriteRenderer>();
+        if (!spriteRenderer || spriteRenderer.transform == worker.transform)
+        {
+            Debug.LogWarning($"{nameof(WorkerAI)} prefab requires a child visual root with a {nameof(SpriteRenderer)}.", this);
+            return false;
+        }
+
         WorkerStats stats = new WorkerStats(
             _initialStats.Hunger,
             _initialStats.Thirst,
@@ -106,7 +120,14 @@ public class WorkerAIManager : MonoBehaviour
             _initialCarryStorage.InitialWheat,
             _initialCarryStorage.MaxWheat);
         WorkerMover mover = new WorkerMover(worker.transform, movementStats);
-        WorkerActionContext context = new WorkerActionContext(worker.transform, mover, stats, movementStats, carryStorage);
+        IAnimPlayer animation = new ActorAnimationController(animSet, spriteRenderer.transform);
+        WorkerActionContext context = new WorkerActionContext(
+            worker.transform,
+            mover,
+            stats,
+            movementStats,
+            carryStorage,
+            animation);
 
         worker.Init(context, actionSelector);
         return true;

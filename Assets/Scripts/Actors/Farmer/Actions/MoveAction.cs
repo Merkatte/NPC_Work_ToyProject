@@ -1,3 +1,4 @@
+using GameAnimation;
 using UnityEngine;
 using WorkerEnum;
 
@@ -31,6 +32,8 @@ public class MoveAction: IAction
             return;
         }
 
+        bool flipX = destination.x < context.Transform.position.x;
+        context.Animation?.TryPlay(AnimType.Move, flipX);
         context.Mover.StartMove(destination);
     }
 
@@ -39,12 +42,17 @@ public class MoveAction: IAction
         if (failed || context?.Mover == null)
             return ActionState.Failed;
 
-        return context.Mover.TickMove();
+        ActionState state = context.Mover.TickMove();
+        if (state != ActionState.Running)
+            context.Animation?.Stop(AnimType.Move);
+
+        return state;
     }
 
     public void Cancel(WorkerActionContext context)
     {
         context?.Mover?.Stop();
+        context?.Animation?.Stop(AnimType.Move);
         ClearDestination();
     }
 

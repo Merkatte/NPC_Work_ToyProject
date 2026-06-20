@@ -1,3 +1,4 @@
+using GameAnimation;
 using UnityEngine;
 using WorkerEnum;
 
@@ -16,6 +17,7 @@ public class WorkAction : IAction
     public void Start(WorkerActionContext context)
     {
         timer = resultStatEntry.Duration;
+        context?.Animation?.TryPlay(AnimType.Work);
     }
 
     public ActionState Tick(WorkerActionContext context)
@@ -27,10 +29,12 @@ public class WorkAction : IAction
 
         context.Stats.Apply(resultStatEntry.StatDelta);
         context.CarryStorage.AddWheat(resultStatEntry.WheatDelta);
+        context.Animation?.Stop(AnimType.Work);
         return ActionState.Success;
     }
 
     public void Cancel(WorkerActionContext context)
     {
+        context?.Animation?.Stop(AnimType.Work);
     }
 }
