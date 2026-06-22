@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using WorkerEnum;
 
@@ -7,6 +8,18 @@ using WorkerEnum;
 public class WorkerActionResultStatData : ScriptableObject
 {
     [SerializeField] private WorkerActionResultStatEntry[] _entries;
+
+    public IEnumerable<ActionType> ActionTypes
+    {
+        get
+        {
+            if (_entries == null)
+                yield break;
+
+            foreach (WorkerActionResultStatEntry entry in _entries)
+                yield return entry.ActionType;
+        }
+    }
 
     public bool TryGetEntry(ActionType actionType, out WorkerActionResultStatEntry entry)
     {

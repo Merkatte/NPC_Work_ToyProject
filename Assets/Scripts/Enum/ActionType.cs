@@ -10,5 +10,6 @@ namespace WorkerEnum
         Rest,
         Move,
         DepositWheat,
+        Attack,
     }
 }

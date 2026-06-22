@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using WorkerEnum;
 
-public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
+public class WorkerActionSet : MonoBehaviour
 {
     [SerializeField] private int _initialPoolSize = 1;
     [SerializeField] private WorkerActionResultStatData _resultStatData;
@@ -12,17 +12,14 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
 
     private void Awake()
     {
-        RegisterPool(ActionType.Rest);
-        RegisterPool(ActionType.Eat);
-        RegisterPool(ActionType.Drink);
-        RegisterPool(ActionType.Work);
+        // Move는 stat 엔트리 없이 모든 액터가 공용으로 사용하므로 코드에서 명시 등록.
         RegisterPool(ActionType.Move);
-        RegisterPool(ActionType.DepositWheat);
-    }
 
-    public bool TryGetAction(ActionType actionType, out IAction action)
-    {
-        return TryRentAction(actionType, out action);
+        if (_resultStatData == null)
+            return;
+
+        foreach (ActionType actionType in _resultStatData.ActionTypes)
+            RegisterPool(actionType);
     }
 
     public bool TryGetResultStatEntry(ActionType actionType, out WorkerActionResultStatEntry entry)
@@ -36,35 +33,12 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
         return _resultStatData.TryGetEntry(actionType, out entry);
     }
 
+    public bool TryGetAction(ActionType actionType, out IAction action)
+    {
+        return TryRentAction(actionType, out action);
+    }
+
     public bool TryGetAction(ActionType actionType, Vector3 destination, out IAction action)
-    {
-        return TryRentAction(actionType, destination, out action);
-    }
-
-    public bool TryGetAction(ActionType actionType, IInventory inventory, out IAction action)
-    {
-        return TryRentAction(actionType, inventory, out action);
-    }
-
-    public bool TryRentAction(ActionType actionType, out IAction action)
-    {
-        action = null;
-
-        if (!_availableActions.TryGetValue(actionType, out Queue<IAction> actions))
-            return false;
-
-        if (actions.Count <= 0 && TryCreateAction(actionType, out IAction createdAction))
-            actions.Enqueue(createdAction);
-
-        if (actions.Count <= 0)
-            return false;
-
-        action = actions.Dequeue();
-        _rentedActionTypes[action] = actionType;
-        return true;
-    }
-
-    public bool TryRentAction(ActionType actionType, Vector3 destination, out IAction action)
     {
         if (!TryRentAction(actionType, out action))
             return false;
@@ -80,7 +54,7 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
         return false;
     }
 
-    public bool TryRentAction(ActionType actionType, IInventory inventory, out IAction action)
+    public bool TryGetAction(ActionType actionType, IInventory inventory, out IAction action)
     {
         if (!TryRentAction(actionType, out action))
             return false;
@@ -88,6 +62,23 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
         if (action is DepositWheatAction depositAction)
         {
             depositAction.SetTargetInventory(inventory);
+            return true;
+        }
+
+        ReturnAction(action);
+        action = null;
+        return false;
+    }
+
+    public bool TryGetAction(ActionType actionType, IDamageable target, IAttackPower attackPower, out IAction action)
+    {
+        if (!TryRentAction(actionType, out action))
+            return false;
+
+        if (action is AttackAction attackAction)
+        {
+            attackAction.SetTarget(target);
+            attackAction.SetAttackPower(attackPower);
             return true;
         }
 
@@ -110,10 +101,31 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
         return true;
     }
 
+    private bool TryRentAction(ActionType actionType, out IAction action)
+    {
+        action = null;
+
+        if (!_availableActions.TryGetValue(actionType, out Queue<IAction> actions))
+            return false;
+
+        if (actions.Count <= 0 && TryCreateAction(actionType, out IAction createdAction))
+            actions.Enqueue(createdAction);
+
+        if (actions.Count <= 0)
+            return false;
+
+        action = actions.Dequeue();
+        _rentedActionTypes[action] = actionType;
+        return true;
+    }
+
     private void RegisterPool(ActionType actionType)
     {
-        if (!_availableActions.ContainsKey(actionType))
-            _availableActions[actionType] = new Queue<IAction>();
+        // 중복 등록 방지: 데이터에 실수로 Move 등 공용 타입이 포함돼도 이중 풀 생성 안 함.
+        if (_availableActions.ContainsKey(actionType))
+            return;
+
+        _availableActions[actionType] = new Queue<IAction>();
 
         int poolSize = Mathf.Max(1, _initialPoolSize);
         for (int i = 0; i < poolSize; i++)
@@ -143,6 +155,9 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
                 ? new DepositWheatAction(depositWheatEntry)
                 : null,
             ActionType.Move => new MoveAction(),
+            ActionType.Attack => TryGetResultStatEntry(actionType, out WorkerActionResultStatEntry attackEntry)
+                ? new AttackAction(attackEntry)
+                : null,
             _ => null
         };
 
@@ -156,5 +171,11 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
 
         if (action is DepositWheatAction depositAction)
             depositAction.ClearTargetInventory();
+
+        if (action is AttackAction attackAction)
+        {
+            attackAction.ClearTarget();
+            attackAction.ClearAttackPower();
+        }
     }
 }

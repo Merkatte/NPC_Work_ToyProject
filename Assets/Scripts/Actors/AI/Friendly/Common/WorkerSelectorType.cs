@@ -1,5 +1,6 @@
 public enum WorkerSelectorType
 {
     Default,
-    Combat
+    Combat,
+    Guard
 }
