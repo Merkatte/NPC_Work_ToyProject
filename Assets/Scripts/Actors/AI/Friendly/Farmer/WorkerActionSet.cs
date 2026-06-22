@@ -41,6 +41,11 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
         return TryRentAction(actionType, destination, out action);
     }
 
+    public bool TryGetAction(ActionType actionType, IInventory inventory, out IAction action)
+    {
+        return TryRentAction(actionType, inventory, out action);
+    }
+
     public bool TryRentAction(ActionType actionType, out IAction action)
     {
         action = null;
@@ -67,6 +72,22 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
         if (action is MoveAction moveAction)
         {
             moveAction.SetDestination(destination);
+            return true;
+        }
+
+        ReturnAction(action);
+        action = null;
+        return false;
+    }
+
+    public bool TryRentAction(ActionType actionType, IInventory inventory, out IAction action)
+    {
+        if (!TryRentAction(actionType, out action))
+            return false;
+
+        if (action is DepositWheatAction depositAction)
+        {
+            depositAction.SetTargetInventory(inventory);
             return true;
         }
 
@@ -132,5 +153,8 @@ public class WorkerActionSet : MonoBehaviour, IActionSet<ActionType>
     {
         if (action is MoveAction moveAction)
             moveAction.ClearDestination();
+
+        if (action is DepositWheatAction depositAction)
+            depositAction.ClearTargetInventory();
     }
 }

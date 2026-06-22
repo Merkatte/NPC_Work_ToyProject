@@ -42,8 +42,8 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
         if (TryGetNeededActionType(context, CriticalThreshold, out ActionType actionType))
             return TryCreatePlan(context, actionType, out plan);
 
-        if (context.CarryStorage.IsWheatFull)
-            return TryCreatePlan(context, ActionType.DepositWheat, out plan);
+        if (context.CarryStorage.IsWheatFull && WarehouseHasSpace())
+            return TryCreateDepositPlan(context, out plan);
 
         if (TryGetNeededActionType(context, PrepareThreshold, out actionType))
             return TryCreatePlan(context, actionType, out plan);
@@ -109,6 +109,46 @@ public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<Worker
         }
 
         plan = WorkerActionPlan.Create(action);
+        return true;
+    }
+
+    private bool WarehouseHasSpace()
+    {
+        if (!_destinationProvider)
+            return false;
+
+        if (!_destinationProvider.TryGetInventory(ActionType.DepositWheat, out IInventory inventory))
+            return false;
+
+        return inventory.TotalCount < inventory.Capacity;
+    }
+
+    private bool TryCreateDepositPlan(WorkerActionContext context, out WorkerActionPlan plan)
+    {
+        plan = null;
+
+        if (!_destinationProvider)
+            return false;
+
+        if (!_destinationProvider.TryGetInventory(ActionType.DepositWheat, out IInventory inventory))
+            return false;
+
+        if (!_actionSet.TryGetAction(ActionType.DepositWheat, inventory, out IAction depositAction))
+            return false;
+
+        if (TryGetMoveDestination(context, ActionType.DepositWheat, out Vector3 destination))
+        {
+            if (!_actionSet.TryGetAction(ActionType.Move, destination, out IAction moveAction))
+            {
+                _actionSet.ReturnAction(depositAction);
+                return false;
+            }
+
+            plan = WorkerActionPlan.Create(moveAction, depositAction);
+            return true;
+        }
+
+        plan = WorkerActionPlan.Create(depositAction);
         return true;
     }
 

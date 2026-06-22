@@ -12,6 +12,8 @@ The current project is a Unity 2D worker/NPC behavior prototype. The core design
 - worker capabilities: `WorkerActionContext`
 - worker action result tuning: `WorkerActionResultStatData`
 - worker carry state: `WorkerCarryStorage`
+- shared animation definitions: `AnimSet` and stateless `IAnim` implementations
+- per-worker animation playback state: `ActorAnimationController`
 - scene destination lookup: providers, consumed by selectors
 - low-level movement/stat logic: worker capability classes
 
@@ -27,31 +29,53 @@ Assets/
 
   Scripts/
     Actors/
-      Worker/
-        WorkerAI.cs
-        WorkerAIManager.cs
-        WorkerActionPlan.cs
-        WorkerActionSet.cs
-        WorkerCombatActionSelector.cs
-        WorkerDefaultActionSelector.cs
-        WorkerSelectorType.cs
-        Actions/
-          DrinkAction.cs
-          DepositWheatAction.cs
-          EatAction.cs
-          MoveAction.cs
-          RestAction.cs
-          WorkAction.cs
-        Context/
-          WorkerActionContext.cs
-          WorkerCarryStorage.cs
-          WorkerMovementStats.cs
-          WorkerMover.cs
-          WorkerStats.cs
-        Data/
-          WorkerActionResultStatData.cs
-          WorkerActionResultStatEntry.cs
-          WorkerStatDelta.cs
+      AI/
+        Enemy/
+
+        Friendly/
+          Common/
+            WorkerAI.cs
+            WorkerActionPlan.cs
+            WorkerSelectorType.cs
+            Actions/
+              DrinkAction.cs
+              EatAction.cs
+              MoveAction.cs
+              RestAction.cs
+            Context/
+              WorkerActionContext.cs
+              WorkerCarryStorage.cs
+              WorkerMovementStats.cs
+              WorkerMover.cs
+              WorkerStats.cs
+            Data/
+              WorkerActionResultStatData.cs
+              WorkerActionResultStatEntry.cs
+              WorkerStatDelta.cs
+
+          Cook/
+            CookActionSelector.cs
+
+          Farmer/
+            WorkerAIManager.cs
+            WorkerActionSet.cs
+            WorkerCombatActionSelector.cs
+            WorkerDefaultActionSelector.cs
+            Actions/
+              DepositWheatAction.cs
+              WorkAction.cs
+
+    Animation/
+      ActorAnimationController.cs
+      AnimContext.cs
+      AnimSet.cs
+      AnimType.cs
+      IAnim.cs
+      IAnimPlayer.cs
+      IAnimSet.cs
+      Anims/
+        MoveAnim.cs
+        WorkAnim.cs
 
     Enum/
       ActionState.cs
@@ -74,14 +98,35 @@ Assets/
 
 ### Folder Intent
 
-`Assets/Scripts/Actors/Worker`
-: Worker-specific runtime code. Worker behavior, stats, movement, action plans, and worker selectors live here.
+`Assets/Scripts/Actors/AI`
+: Root for actor AI implementation. Separate player-aligned actors under `Friendly` from hostile actors under `Enemy`.
 
-`Assets/Scripts/Actors/Worker/Actions`
-: Worker action implementations. New worker behaviors should normally appear here as new `IAction` implementations.
+`Assets/Scripts/Actors/AI/Friendly/Common`
+: Reusable friendly AI execution lifecycle, plan types, movement/recovery actions, runtime capabilities, and shared action-result data. Common code must not choose a job-specific production policy.
 
-`Assets/Scripts/Actors/Worker/Data`
-: Worker-owned tuning/data assets and serializable value types. Action result duration and stat delta data lives here instead of inside `WorkerAI` or action implementations.
+`Assets/Scripts/Actors/AI/Friendly/Common/Actions`
+: Actions reusable across friendly roles, currently movement and basic need recovery.
+
+`Assets/Scripts/Actors/AI/Friendly/Common/Context`
+: Per-friendly-actor runtime state and capabilities exposed to selectors/actions.
+
+`Assets/Scripts/Actors/AI/Friendly/Common/Data`
+: Action result tuning/value types shared by friendly roles. `WheatDelta` remains a known Farmer-oriented field to generalize when the item production model is expanded.
+
+`Assets/Scripts/Actors/AI/Friendly/Cook`
+: Cook-worker decision code. The initial `CookActionSelector` implements the common worker selector contract but intentionally produces no plan until Cook actions and their action set are introduced.
+
+`Assets/Scripts/Actors/AI/Friendly/Farmer`
+: Farmer composition, action ownership, and production decision code. It consumes the reusable friendly Common runtime.
+
+`Assets/Scripts/Actors/AI/Friendly/Farmer/Actions`
+: Farmer-only production and deposit action implementations. Put reusable need/movement actions in Common instead.
+
+`Assets/Scripts/Actors/AI/Enemy`
+: Reserved for hostile actor AI. Friendly Common code must not depend on Enemy implementations.
+
+`Assets/Scripts/Animation`
+: Shared animation contracts, lookup, and per-actor playback lifecycle. `IAnim` implementations are stateless definitions; `ActorAnimationController` owns runtime Tween state for one visual root.
 
 `Assets/Scripts/Interface`
 : Shared role contracts used to reduce dependency on concrete implementations.
@@ -163,9 +208,24 @@ When autonomous movement is planned as `MoveAction -> EatAction`, the selector a
 
 ## Script Roles
 
+### CookActionSelector
+
+File: `Assets/Scripts/Actors/AI/Friendly/Cook/CookActionSelector.cs`
+
+Role:
+
+- Provides the initial Cook-worker selector boundary.
+- Implements `IActionSelector<WorkerActionContext, WorkerActionPlan>` so it can use the existing WorkerAI execution contract.
+- Currently returns no plan because Cook actions, Cook state, and Cook action ownership are not defined yet.
+
+Should not:
+
+- Reuse `WorkerActionSet` merely to satisfy initialization before Cook actions are designed.
+- Put cooking execution logic directly in the selector.
+
 ### WorkerAIManager
 
-File: `Assets/Scripts/Actors/Worker/WorkerAIManager.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerAIManager.cs`
 
 Role:
 
@@ -175,6 +235,7 @@ Role:
 - Creates a worker-specific selector instance from the selected template.
 - Resolves the selector-side `WorkerActionSet` from the selector template instance and injects it into selectors that require setup.
 - Creates `WorkerStats`, `WorkerCarryStorage`, `WorkerMover`, and `WorkerActionContext`.
+- Creates one shared `AnimSet`, then creates one `ActorAnimationController` per spawned worker using the worker's child visual root.
 - Injects the runtime context and selector into `WorkerAI`.
 - Tracks spawned worker instances.
 
@@ -187,7 +248,7 @@ Should not:
 
 ### WorkerAI
 
-File: `Assets/Scripts/Actors/Worker/WorkerAI.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAI.cs`
 
 Role:
 
@@ -211,12 +272,12 @@ Should not:
 
 ### WorkerActionContext
 
-File: `Assets/Scripts/Actors/Worker/Context/WorkerActionContext.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/Context/WorkerActionContext.cs`
 
 Role:
 
 - Provides actions with access to worker capabilities and state.
-- Contains `Transform`, `WorkerMover`, `WorkerStats`, `WorkerMovementStats`, `WorkerCarryStorage`, and the current `WorkerActionPlan`.
+- Contains `Transform`, `WorkerMover`, `WorkerStats`, `WorkerMovementStats`, `WorkerCarryStorage`, `IAnimPlayer`, and the current `WorkerActionPlan`.
 
 Should not:
 
@@ -231,7 +292,7 @@ Important:
 
 ### WorkerActionPlan
 
-File: `Assets/Scripts/Actors/Worker/WorkerActionPlan.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/WorkerActionPlan.cs`
 
 Role:
 
@@ -252,7 +313,7 @@ Should not:
 
 ### WorkerDefaultActionSelector
 
-File: `Assets/Scripts/Actors/Worker/WorkerDefaultActionSelector.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerDefaultActionSelector.cs`
 
 Role:
 
@@ -286,7 +347,7 @@ Replaceability:
 
 ### WorkerActionSet
 
-File: `Assets/Scripts/Actors/Worker/WorkerActionSet.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerActionSet.cs`
 
 Role:
 
@@ -324,13 +385,15 @@ Important:
 
 ### MoveAction
 
-File: `Assets/Scripts/Actors/Worker/Actions/MoveAction.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/Actions/MoveAction.cs`
 
 Role:
 
 - Executes movement behavior from the active plan.
 - Uses the destination injected when the action is rented from `WorkerActionSet`.
 - Delegates low-level movement to `WorkerMover`.
+- Requests `AnimType.Move` through `WorkerActionContext.Animation` and supplies horizontal facing from the destination direction.
+- Stops its animation when movement completes, fails, or is cancelled.
 
 Depends on:
 
@@ -361,6 +424,7 @@ Role:
 - Apply their injected `WorkerStatDelta` to `WorkerStats` on completion.
 - Return `Success` after applying effect.
 - `WorkAction` adds the injected wheat delta to `WorkerCarryStorage` on completion.
+- `WorkAction` requests `AnimType.Work` through `WorkerActionContext.Animation` and stops it on completion or cancellation.
 - `DepositWheatAction` clears carried wheat through `WorkerCarryStorage` on completion.
 
 Current stat effects live in `WorkerActionResultStatData`:
@@ -382,9 +446,9 @@ They should not:
 
 Files:
 
-- `Assets/Scripts/Actors/Worker/Data/WorkerActionResultStatData.cs`
-- `Assets/Scripts/Actors/Worker/Data/WorkerActionResultStatEntry.cs`
-- `Assets/Scripts/Actors/Worker/Data/WorkerStatDelta.cs`
+- `Assets/Scripts/Actors/AI/Friendly/Common/Data/WorkerActionResultStatData.cs`
+- `Assets/Scripts/Actors/AI/Friendly/Common/Data/WorkerActionResultStatEntry.cs`
+- `Assets/Scripts/Actors/AI/Friendly/Common/Data/WorkerStatDelta.cs`
 
 Role:
 
@@ -401,7 +465,7 @@ Should not:
 
 ### WorkerStats
 
-File: `Assets/Scripts/Actors/Worker/WorkerStats.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/Context/WorkerStats.cs`
 
 Role:
 
@@ -418,7 +482,7 @@ Should not:
 
 ### WorkerCarryStorage
 
-File: `Assets/Scripts/Actors/Worker/Context/WorkerCarryStorage.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/Context/WorkerCarryStorage.cs`
 
 Role:
 
@@ -434,7 +498,7 @@ Should not:
 
 ### WorkerMover
 
-File: `Assets/Scripts/Actors/Worker/WorkerMover.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/Context/WorkerMover.cs`
 
 Role:
 
@@ -451,7 +515,7 @@ Should not:
 
 ### WorkerMovementStats
 
-File: `Assets/Scripts/Actors/Worker/WorkerMovementStats.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/Context/WorkerMovementStats.cs`
 
 Role:
 
@@ -464,6 +528,44 @@ Should not:
 - Decide movement destination.
 - Execute movement.
 - Know about selectors or action queues.
+
+### AnimSet And IAnim
+
+Files:
+
+- `Assets/Scripts/Animation/AnimSet.cs`
+- `Assets/Scripts/Animation/IAnimSet.cs`
+- `Assets/Scripts/Animation/IAnim.cs`
+- `Assets/Scripts/Animation/Anims/MoveAnim.cs`
+- `Assets/Scripts/Animation/Anims/WorkAnim.cs`
+
+Role:
+
+- `AnimSet` is the shared registry from `AnimType` to one stateless `IAnim` definition.
+- `IAnim` creates a Tween from the supplied `AnimContext` but does not retain the target or active Tween.
+- A single `AnimSet` may be shared by every worker managed by one `WorkerAIManager`.
+
+Should not:
+
+- Store per-worker Transform, facing, or active Tween state.
+- Rent or pool animation definitions; the registered definitions are reusable objects.
+
+### ActorAnimationController
+
+File: `Assets/Scripts/Animation/ActorAnimationController.cs`
+
+Role:
+
+- Implements `IAnimPlayer` for one actor visual root.
+- Resolves animation definitions through the shared `IAnimSet`.
+- Owns that actor's active Tween, active `AnimType`, and horizontal facing.
+- Stops the previous Tween before starting another animation.
+
+Important:
+
+- The target must be a child visual Transform, not the gameplay root moved by `WorkerMover`.
+- Facing set by movement remains available to animations such as Work that do not choose a new direction.
+- `WorkerAI` does not resolve or call this controller directly; actions access it through `WorkerActionContext.Animation`.
 
 ### DestinationProvider
 
@@ -531,7 +633,10 @@ The intent is that higher-level orchestration depends on role contracts and cont
 ```text
 WorkerAIManager
   instantiates WorkerAI prefab
-  creates WorkerStats / WorkerCarryStorage / WorkerMover / WorkerActionContext
+  creates one shared AnimSet
+  creates WorkerStats / WorkerCarryStorage / WorkerMover
+  creates one ActorAnimationController for the worker child visual root
+  creates WorkerActionContext containing IAnimPlayer
   creates a worker-specific IActionSelector from its selector entries
   injects the selector template's WorkerActionSet into selectors that require setup
   calls WorkerAI.Init(context, selector)
@@ -603,6 +708,23 @@ WorkerCarryStorage
   owns clamped carried wheat values
 ```
 
+### Animation Dependency Flow
+
+```text
+MoveAction / WorkAction
+  request an AnimType through WorkerActionContext.Animation (IAnimPlayer)
+
+ActorAnimationController (one per worker)
+  owns active Tween and facing
+  resolves a stateless IAnim through the shared IAnimSet
+
+AnimSet (shared by workers)
+  maps AnimType to IAnim
+
+IAnim
+  creates a Tween targeting that worker's child visual Transform
+```
+
 ### Behavior Graph Dependency Flow
 
 ```text
@@ -619,7 +741,7 @@ Behavior Graph nodes should remain bridge code. They should not become the main 
 ### Adding A New Worker Behavior
 
 1. Add a new value to `ActionType` if the behavior needs selection through `WorkerActionSet`.
-2. Create a new `IAction` implementation under `Assets/Scripts/Actors/Worker/Actions`.
+2. Create reusable movement/need behavior under `Assets/Scripts/Actors/AI/Friendly/Common/Actions`; create job-specific behavior under the matching role folder such as `Friendly/Farmer/Actions` or `Friendly/Cook/Actions`.
 3. Register the action in `WorkerActionSet`.
 4. Add a `WorkerActionResultStatData` entry if the behavior has duration, cost, or reward values.
 5. Update the selector or create a new selector that can choose the action.
@@ -627,6 +749,16 @@ Behavior Graph nodes should remain bridge code. They should not become the main 
 7. Add required plan data to `WorkerActionPlan` only when the data belongs to the action sequence itself, not to worker stats or low-level capability settings.
 
 Do not put new behavior directly in `WorkerAI`.
+
+### Adding A New Animation
+
+1. Add the identifier to `AnimType`.
+2. Add a stateless `IAnim` implementation under `Assets/Scripts/Animation/Anims`.
+3. Register one instance in `AnimSet`.
+4. Request the animation from the owning action through `WorkerActionContext.Animation`.
+5. Stop the matching animation on success, failure, and cancellation.
+
+Do not add animation lookup or Tween ownership to `WorkerAI` or selectors.
 
 ### Adding A New Decision Policy
 

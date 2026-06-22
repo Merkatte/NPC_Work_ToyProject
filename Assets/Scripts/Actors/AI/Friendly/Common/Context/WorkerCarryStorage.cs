@@ -25,10 +25,13 @@ public sealed class WorkerCarryStorage
         return currentWheat - before;
     }
 
-    public int DepositAllWheat()
+    public int RemoveWheat(int amount)
     {
-        int depositedWheat = currentWheat;
-        currentWheat = 0;
-        return depositedWheat;
+        if (amount <= 0)
+            return 0;
+
+        int removed = Mathf.Min(amount, currentWheat);
+        currentWheat -= removed;
+        return removed;
     }
 }

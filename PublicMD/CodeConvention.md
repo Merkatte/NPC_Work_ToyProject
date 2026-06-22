@@ -12,7 +12,9 @@
 
 ## Structure
 - Keep one primary class per `.cs` file unless the secondary type is a small serializable data holder used only by that file.
-- Put Worker-specific behavior under `Assets/Scripts/Actors/Worker`.
+- Put AI actor code under `Assets/Scripts/Actors/AI`, split first into `Friendly` and `Enemy`.
+- Put reusable friendly AI execution, movement, needs, context, and shared action data under `Assets/Scripts/Actors/AI/Friendly/Common`.
+- Put job-specific behavior under its friendly role folder, such as `Friendly/Farmer` or `Friendly/Cook`.
 - Put truly project-wide enums under `Assets/Scripts/Enum`.
 - Put truly project-wide provider components under `Assets/Scripts/Provider`.
 - If an enum, provider, data object, or helper belongs to one domain only, keep it under that domain folder instead of a global folder.
@@ -50,6 +52,16 @@
 - Context may expose the active plan, but context should not decide or replace plans on its own.
 - A plan should contain execution parameters, not hidden behavior logic.
 
+## Animation Rules
+- `WorkerAI` and selectors must not resolve or play animations.
+- Actions request playback through `WorkerActionContext.Animation` using the `IAnimPlayer` contract.
+- `IAnim` implementations must remain stateless. They must not retain actor Transforms, facing, or active Tweens.
+- `AnimSet` is a shared read-only registry of reusable `IAnim` definitions; do not add rent/return pooling for these definitions.
+- Create one `ActorAnimationController` per actor. It owns that actor's active Tween and facing state.
+- Tween visual properties only on a child visual root. Do not animate the gameplay root moved by `WorkerMover`.
+- An action that starts an animation must stop its matching `AnimType` on completion, failure, and cancellation.
+- Actions that determine direction, such as `MoveAction`, may set `FlipX`. Direction-neutral actions should preserve the controller's current facing.
+
 ## Data Assets
 - A data asset (ScriptableObject or CSV) must have one clear purpose, the same way a script has one
   clear responsibility. Separate data by role, not by convenience.
@@ -62,8 +74,9 @@
   tuning, drop tables, action tuning) into a single mixed asset.
 - Match the storage format to the data shape: use ScriptableObject for small designer-tuned sets and
   enum-keyed lookups; use CSV when the data is large, tabular, or row-heavy and edited in bulk.
-- Place a data asset under the domain folder that owns it, the same as scripts. Worker-owned data
-  belongs under `Assets/Scripts/Actors/Worker/Data`; do not put domain-specific data in a global
+- Place a data asset under the domain folder that owns it, the same as scripts. Shared friendly AI
+  action data belongs under `Assets/Scripts/Actors/AI/Friendly/Common/Data`; role-specific data belongs
+  under that role folder. Do not put domain-specific data in a global
   folder.
 - A consumer should read one concept from one data asset. Mixing concepts forces readers to load and
   understand unrelated data just to use one value.
