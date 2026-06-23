@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.Serialization;
 using WorkerEnum;
 
-public class WorkerDefaultActionSelector : MonoBehaviour, IActionSelector<WorkerActionContext, WorkerActionPlan>, IWorkerActionSelectorSetup
+public class FarmerActionSelector : MonoBehaviour, IActionSelector<WorkerActionContext, WorkerActionPlan>, IWorkerActionSelectorSetup
 {
     private const float CriticalThreshold = 70f;
     private const float PrepareThreshold = 60f;
