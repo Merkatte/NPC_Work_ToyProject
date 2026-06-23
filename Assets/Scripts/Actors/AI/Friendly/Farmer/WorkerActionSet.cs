@@ -12,8 +12,9 @@ public class WorkerActionSet : MonoBehaviour
 
     private void Awake()
     {
-        // Move는 stat 엔트리 없이 모든 액터가 공용으로 사용하므로 코드에서 명시 등록.
+        // Move·Seek는 stat 엔트리 없이 공용으로 사용하므로 코드에서 명시 등록.
         RegisterPool(ActionType.Move);
+        RegisterPool(ActionType.Seek);
 
         if (_resultStatData == null)
             return;
@@ -62,6 +63,22 @@ public class WorkerActionSet : MonoBehaviour
         if (action is DepositWheatAction depositAction)
         {
             depositAction.SetTargetInventory(inventory);
+            return true;
+        }
+
+        ReturnAction(action);
+        action = null;
+        return false;
+    }
+
+    public bool TryGetAction(ActionType actionType, CombatTargetHolder holder, float radius, LayerMask enemyMask, out IAction action)
+    {
+        if (!TryRentAction(actionType, out action))
+            return false;
+
+        if (action is SeekAction seekAction)
+        {
+            seekAction.SetScanParams(holder, radius, enemyMask);
             return true;
         }
 
@@ -155,6 +172,7 @@ public class WorkerActionSet : MonoBehaviour
                 ? new DepositWheatAction(depositWheatEntry)
                 : null,
             ActionType.Move => new MoveAction(),
+            ActionType.Seek => new SeekAction(),
             ActionType.Attack => TryGetResultStatEntry(actionType, out WorkerActionResultStatEntry attackEntry)
                 ? new AttackAction(attackEntry)
                 : null,
@@ -171,6 +189,9 @@ public class WorkerActionSet : MonoBehaviour
 
         if (action is DepositWheatAction depositAction)
             depositAction.ClearTargetInventory();
+
+        if (action is SeekAction seekAction)
+            seekAction.ClearScanParams();
 
         if (action is AttackAction attackAction)
         {

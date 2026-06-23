@@ -7,6 +7,7 @@ public class WorkerAI : MonoBehaviour
     private WorkerActionPlan currentPlan;
     private bool currentActionStarted;
     private IActionSelector<WorkerActionContext, WorkerActionPlan> actionSelector;
+    private Health _health;
 
     public WorkerActionContext Context => context;
     public bool IsInitialized => context != null && actionSelector != null;
@@ -17,15 +18,35 @@ public class WorkerAI : MonoBehaviour
     {
         this.context = context;
         this.actionSelector = actionSelector;
+
+        // 같은 GameObject에 Health가 있으면 사망 이벤트를 구독한다.
+        // WorkerAI는 IDamageable을 직접 구현하지 않고 Health에 위임한다.
+        if (TryGetComponent(out _health))
+            _health.OnDied += OnWorkerDied;
     }
 
     private void OnDisable()
+    {
+        if (_health != null)
+            _health.OnDied -= OnWorkerDied;
+
+        currentPlan?.CurrentAction?.Cancel(context);
+        context?.ClearPlan(currentPlan);
+        ReturnPlanActions(currentPlan);
+        currentPlan = null;
+        currentActionStarted = false;
+    }
+
+    private void OnWorkerDied()
     {
         currentPlan?.CurrentAction?.Cancel(context);
         context?.ClearPlan(currentPlan);
         ReturnPlanActions(currentPlan);
         currentPlan = null;
         currentActionStarted = false;
+
+        // AI 틱을 중지한다. 구독 해제는 OnDisable에서 처리된다.
+        enabled = false;
     }
 
     private void Update()
