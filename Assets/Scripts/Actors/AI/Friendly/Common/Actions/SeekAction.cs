@@ -1,14 +1,15 @@
 using UnityEngine;
 using WorkerEnum;
 
-// 적을 탐지하는 액션. Physics2D.OverlapCircleNonAlloc으로 Enemy 레이어를 질의하며
+// 정지 경계 액션. 제자리에서 EnemyScanner로 적을 탐지하며,
 // 살아있는 IDamageable을 발견하면 holder에 기록하고 Success를 반환한다.
+// 이동하지 않는다. 이동하며 탐지하는 순찰은 PatrolAction이 담당한다.
 // 공격 명령을 직접 내리지 않는다. selector가 다음 프레임 Attack plan으로 전환한다.
 public class SeekAction : IAction
 {
     private const int ScanBufferSize = 10;
 
-    private readonly Collider2D[] _scanBuffer = new Collider2D[ScanBufferSize];
+    private readonly EnemyScanner _scanner = new EnemyScanner(ScanBufferSize);
 
     private CombatTargetHolder _holder;
     private float _radius;
@@ -45,35 +46,8 @@ public class SeekAction : IAction
         }
 
         Vector2 pos = context.Transform.position;
-        ContactFilter2D filter = new ContactFilter2D();
-        filter.SetLayerMask(_enemyMask);
-        filter.useTriggers = true;
-        int count = Physics2D.OverlapCircle(pos, _radius, filter, _scanBuffer);
 
-        IDamageable nearest = null;
-        Transform nearestTransform = null;
-        float nearestSqDist = float.MaxValue;
-
-        for (int i = 0; i < count; i++)
-        {
-            Collider2D col = _scanBuffer[i];
-            if (!col)
-                continue;
-
-            IDamageable candidate = col.GetComponent<IDamageable>();
-            if (candidate == null || !candidate.IsAlive)
-                continue;
-
-            float sqDist = ((Vector2)col.transform.position - pos).sqrMagnitude;
-            if (sqDist < nearestSqDist)
-            {
-                nearestSqDist = sqDist;
-                nearest = candidate;
-                nearestTransform = col.transform;
-            }
-        }
-
-        if (nearest != null)
+        if (_scanner.TryFindNearest(pos, _radius, _enemyMask, out IDamageable nearest, out Transform nearestTransform))
         {
             _holder.SetTarget(nearest, nearestTransform);
             return ActionState.Success;

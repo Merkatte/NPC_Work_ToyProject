@@ -56,26 +56,7 @@ public class FarmerActionSelector : MonoBehaviour, IActionSelector<WorkerActionC
 
     private bool TryGetNeededActionType(WorkerActionContext context, float threshold, out ActionType actionType)
     {
-        if (context.Stats.Thirst >= threshold)
-        {
-            actionType = ActionType.Drink;
-            return true;
-        }
-
-        if (context.Stats.Hunger >= threshold)
-        {
-            actionType = ActionType.Eat;
-            return true;
-        }
-
-        if (context.Stats.Fatigue >= threshold)
-        {
-            actionType = ActionType.Rest;
-            return true;
-        }
-
-        actionType = default;
-        return false;
+        return WorkerNeedsPolicy.TryGetNeededActionType(context.Stats, threshold, out actionType);
     }
 
     public bool ReturnAction(IAction action)

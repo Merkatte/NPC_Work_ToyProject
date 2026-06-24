@@ -12,9 +12,10 @@ public class WorkerActionSet : MonoBehaviour
 
     private void Awake()
     {
-        // Move·Seek는 stat 엔트리 없이 공용으로 사용하므로 코드에서 명시 등록.
+        // Move·Seek·Patrol은 stat 엔트리 없이 공용으로 사용하므로 코드에서 명시 등록.
         RegisterPool(ActionType.Move);
         RegisterPool(ActionType.Seek);
+        RegisterPool(ActionType.Patrol);
 
         if (_resultStatData == null)
             return;
@@ -79,6 +80,22 @@ public class WorkerActionSet : MonoBehaviour
         if (action is SeekAction seekAction)
         {
             seekAction.SetScanParams(holder, radius, enemyMask);
+            return true;
+        }
+
+        ReturnAction(action);
+        action = null;
+        return false;
+    }
+
+    public bool TryGetAction(ActionType actionType, PatrolParams patrolParams, out IAction action)
+    {
+        if (!TryRentAction(actionType, out action))
+            return false;
+
+        if (action is PatrolAction patrolAction)
+        {
+            patrolAction.SetPatrolParams(patrolParams);
             return true;
         }
 
@@ -173,6 +190,7 @@ public class WorkerActionSet : MonoBehaviour
                 : null,
             ActionType.Move => new MoveAction(),
             ActionType.Seek => new SeekAction(),
+            ActionType.Patrol => new PatrolAction(),
             ActionType.Attack => TryGetResultStatEntry(actionType, out WorkerActionResultStatEntry attackEntry)
                 ? new AttackAction(attackEntry)
                 : null,
@@ -192,6 +210,9 @@ public class WorkerActionSet : MonoBehaviour
 
         if (action is SeekAction seekAction)
             seekAction.ClearScanParams();
+
+        if (action is PatrolAction patrolAction)
+            patrolAction.ClearPatrolParams();
 
         if (action is AttackAction attackAction)
         {

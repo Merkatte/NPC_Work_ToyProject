@@ -12,5 +12,6 @@ namespace WorkerEnum
         DepositWheat,
         Attack,
         Seek,
+        Patrol,
     }
 }
