@@ -85,8 +85,12 @@ public class PatrolAction : IAction
         if (moveState == ActionState.Running)
             return ActionState.Running;
 
-        // 이동 완료 또는 실패 시 idle 단계로 전환.
         context.Animation?.Stop(AnimType.Move);
+
+        if (moveState == ActionState.Failed)
+            return ActionState.Failed;
+
+        // 이동 완료(Success) 시에만 idle 단계로 전환.
         _idling = true;
         _idleTimer = 0f;
         _idleTarget = Random.Range(_params.IdleMin, _params.IdleMax);
