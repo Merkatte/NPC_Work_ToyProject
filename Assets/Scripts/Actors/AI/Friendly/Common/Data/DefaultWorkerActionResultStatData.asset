@@ -48,3 +48,10 @@ MonoBehaviour:
       _thirst: 0
       _fatigue: 0
     _wheatDelta: 0
+  - _actionType: 7
+    _duration: 1
+    _statDelta:
+      _hunger: 0
+      _thirst: 0
+      _fatigue: 0
+    _wheatDelta: 0
