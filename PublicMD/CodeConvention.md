@@ -15,9 +15,10 @@
 - Put AI actor code under `Assets/Scripts/Actors/AI`, split first into `Friendly` and `Enemy`.
 - Put reusable friendly AI execution, movement, needs, context, and shared action data under `Assets/Scripts/Actors/AI/Friendly/Common`.
 - Put job-specific behavior under its friendly role folder, such as `Friendly/Farmer` or `Friendly/Cook`.
-- Put truly project-wide enums under `Assets/Scripts/Enum`.
-- Put truly project-wide provider components under `Assets/Scripts/Provider`.
-- If an enum, provider, data object, or helper belongs to one domain only, keep it under that domain folder instead of a global folder.
+- The top-level `Assets/Scripts/` folders are fixed by type: `Actors`, `Animation`, `Enum`, `Interface`, `Manager`, `Provider`, `Systems`. Do not add new top-level folders here for individual features.
+- `Interface/`, `Enum/`, `Manager/`, `Provider/` hold only project-wide types used across two or more unrelated domains.
+- New independent feature systems go under `Assets/Scripts/Systems/<FeatureName>/`. The subfolder is self-contained and may include interfaces, managers, data, enums, and implementations specific to that feature.
+- Do not create a `Systems/` subfolder for a feature until it has enough scripts to justify separation. A single utility class does not need its own subfolder.
 - Each script must have a clear primary responsibility.
 - Do not split scripts only for the sake of splitting them. If two pieces of code serve the same practical responsibility, keep them together unless separating them removes a real dependency or clarifies ownership.
 - Do split code when a responsibility is clearly different. A parser should parse, a manager should manage, a provider should provide, and an action should execute behavior.

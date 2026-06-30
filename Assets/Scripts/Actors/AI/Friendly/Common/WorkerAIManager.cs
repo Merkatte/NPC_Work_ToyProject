@@ -37,16 +37,15 @@ public class WorkerAIManager : MonoBehaviour
     {
         if (!_workerPrefab)
         {
-            Debug.Log("No WorkerPrefab");
+            Debug.LogWarning($"{nameof(WorkerAIManager)}: no worker prefab assigned.", this);
             return null;
         }
 
         WorkerAI worker = Instantiate(_workerPrefab, position, rotation, _workerParent);
-        Debug.Log(worker);
         if (!TryInitializeWorker(worker))
         {
             Destroy(worker.gameObject);
-            Debug.Log("Worker Init Fail");
+            Debug.LogWarning($"{nameof(WorkerAIManager)}: worker initialization failed.", this);
             return null;
         }
 
@@ -64,22 +63,13 @@ public class WorkerAIManager : MonoBehaviour
 
     private void SpawnInitialWorkers()
     {
-        Debug.Log("Spawn Init Called");
         if (_spawnPoints == null)
-        {
-            Debug.Log("SpawnPoint is null");
             return;
-        }
-
-        Debug.Log(_spawnPoints.Length);
 
         foreach (var spawnPoint in _spawnPoints)
         {
             if (!spawnPoint)
-            {
-                Debug.Log("There is no SpawnPoints");
                 continue;
-            }
 
             SpawnWorker(spawnPoint.position, spawnPoint.rotation);
         }
@@ -88,10 +78,7 @@ public class WorkerAIManager : MonoBehaviour
     private bool TryInitializeWorker(WorkerAI worker)
     {
         if (!worker)
-        {
-            Debug.Log(worker);
             return false;
-        }
 
         if (!worker.TryGetComponent(out WorkerMovementStats movementStats))
         {

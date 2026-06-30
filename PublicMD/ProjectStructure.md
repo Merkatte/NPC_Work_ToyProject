@@ -31,17 +31,28 @@ Assets/
     Actors/
       AI/
         Enemy/
+          Enemy.cs
 
         Friendly/
           Common/
             WorkerAI.cs
+            WorkerAIManager.cs
             WorkerActionPlan.cs
+            WorkerActionSet.cs
+            WorkerNeedsPolicy.cs
             WorkerSelectorType.cs
             Actions/
+              AttackAction.cs
               DrinkAction.cs
               EatAction.cs
               MoveAction.cs
+              PatrolAction.cs
               RestAction.cs
+              SeekAction.cs
+            Combat/
+              CombatTargetHolder.cs
+              EnemyScanner.cs
+              PatrolParams.cs
             Context/
               WorkerActionContext.cs
               WorkerCarryStorage.cs
@@ -57,13 +68,13 @@ Assets/
             CookActionSelector.cs
 
           Farmer/
-            WorkerAIManager.cs
-            WorkerActionSet.cs
-            WorkerCombatActionSelector.cs
-            WorkerDefaultActionSelector.cs
+            FarmerActionSelector.cs
             Actions/
               DepositWheatAction.cs
               WorkAction.cs
+
+          Guard/
+            GuardActionSelector.cs
 
     Animation/
       ActorAnimationController.cs
@@ -86,14 +97,35 @@ Assets/
     Interface/
       IAction.cs
       IActionSelector.cs
-      IActionSet.cs
+      IAttackPower.cs
+      IDamageable.cs
+      IInventory.cs
       ITickable.cs
+      IWorkerActionSelectorSetup.cs
 
     Manager/
       TickManager.cs
 
     Provider/
       DestinationProvider.cs
+
+    Systems/
+      Combat/
+        AttackPower.cs
+        Health.cs
+      Facility/
+        WallPerimeter.cs
+        WarehouseInventory.cs
+      Recruitment/
+        AlwaysAffordableCostPolicy.cs
+        CandidateStatPreview.cs
+        IRecruitmentCostPolicy.cs
+        IResidentCandidateView.cs
+        IResidentSpawner.cs
+        RecruitmentManager.cs
+        RecruitmentResult.cs
+        ResidentCandidateDefinition.cs
+        ResidentCandidateKind.cs
 ```
 
 ### Folder Intent
@@ -117,7 +149,7 @@ Assets/
 : Cook-worker decision code. The initial `CookActionSelector` implements the common worker selector contract but intentionally produces no plan until Cook actions and their action set are introduced.
 
 `Assets/Scripts/Actors/AI/Friendly/Farmer`
-: Farmer composition, action ownership, and production decision code. It consumes the reusable friendly Common runtime.
+: Farmer-specific decision code and production actions. `FarmerActionSelector` and its actions (`WorkAction`, `DepositWheatAction`) live here. Shared infrastructure (`WorkerAIManager`, `WorkerActionSet`) has been moved to Common.
 
 `Assets/Scripts/Actors/AI/Friendly/Farmer/Actions`
 : Farmer-only production and deposit action implementations. Put reusable need/movement actions in Common instead.
@@ -129,13 +161,28 @@ Assets/
 : Shared animation contracts, lookup, and per-actor playback lifecycle. `IAnim` implementations are stateless definitions; `ActorAnimationController` owns runtime Tween state for one visual root.
 
 `Assets/Scripts/Interface`
-: Shared role contracts used to reduce dependency on concrete implementations.
+: Project-wide role contracts shared across multiple domains. Only interfaces used by two or more unrelated domains belong here. Domain-specific interfaces belong inside their `Systems/` subfolder.
 
 `Assets/Scripts/Enum`
-: Currently contains project-level enums. If an enum becomes domain-specific, prefer moving it near that domain instead of growing this folder indefinitely.
+: Project-wide enums shared across multiple domains. Only enums used by two or more unrelated domains belong here. Domain-specific enums belong inside their `Systems/` subfolder.
+
+`Assets/Scripts/Manager`
+: Project-wide manager components. Only managers that own cross-domain concerns belong here. Domain-specific managers belong inside their `Systems/` subfolder.
 
 `Assets/Scripts/Provider`
-: Scene/data provider components. Currently contains destination lookup. If a provider becomes worker-only, consider moving it under the worker domain.
+: Project-wide provider components. Currently contains destination lookup shared by worker selectors.
+
+`Assets/Scripts/Systems`
+: One subfolder per independent feature system. Each subfolder is self-contained and may include interfaces, managers, data, and other types specific to that feature. Adding a new feature system means adding a subfolder here — not a new top-level Scripts folder.
+
+`Assets/Scripts/Systems/Combat`
+: Health and attack power components used by scene actors.
+
+`Assets/Scripts/Systems/Facility`
+: Scene facility components such as wall perimeter and warehouse inventory.
+
+`Assets/Scripts/Systems/Recruitment`
+: Resident recruitment system. Contains its own interfaces, manager, data, and policy implementations.
 
 `Assets/BehaviorGraph/CustomActionNode`
 : Unity Behavior custom nodes that bridge Behavior Graph execution to the worker action system.
@@ -225,7 +272,7 @@ Should not:
 
 ### WorkerAIManager
 
-File: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerAIManager.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAIManager.cs`
 
 Role:
 
@@ -311,9 +358,9 @@ Should not:
 - Start or tick actions.
 - Store worker stat-like values such as move speed or stopping distance.
 
-### WorkerDefaultActionSelector
+### FarmerActionSelector
 
-File: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerDefaultActionSelector.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Farmer/FarmerActionSelector.cs`
 
 Role:
 
@@ -347,7 +394,7 @@ Replaceability:
 
 ### WorkerActionSet
 
-File: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerActionSet.cs`
+File: `Assets/Scripts/Actors/AI/Friendly/Common/WorkerActionSet.cs`
 
 Role:
 
@@ -615,7 +662,7 @@ Preferred dependency direction:
 WorkerAI
   -> IActionSelector<WorkerActionContext, WorkerActionPlan>
 
-WorkerDefaultActionSelector
+FarmerActionSelector
   -> WorkerActionSet
   -> WorkerActionResultStatData through WorkerActionSet lookup
   -> DestinationProvider
@@ -647,7 +694,7 @@ WorkerAI
   has IActionSelector
   asks selector for plan
 
-WorkerDefaultActionSelector
+FarmerActionSelector
   reads WorkerStats through context
   uses WorkerActionSet to get IAction
   may use WorkerActionSet to read action result data
@@ -669,7 +716,7 @@ IAction implementation
 ### Movement Dependency Flow
 
 ```text
-WorkerDefaultActionSelector
+FarmerActionSelector
   decides intended action
   queues MoveAction before the intended action when destination movement is needed
 

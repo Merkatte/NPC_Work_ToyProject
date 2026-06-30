@@ -25,7 +25,6 @@ public class MoveAction: IAction
     public void Start(WorkerActionContext context)
     {
         failed = false;
-        Debug.Log("Worker Moving Start");
         if (context?.Mover == null || !TryGetDestination(context, out Vector3 destination))
         {
             failed = true;

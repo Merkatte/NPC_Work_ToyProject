@@ -4,7 +4,7 @@ using WorkerEnum;
 
 public class DestinationProvider : MonoBehaviour
 {
-    [SerializeField] private DestinationInfo[] _destinationInfos;
+    [SerializeField] private DestinationInfo[] _destinationInfos = Array.Empty<DestinationInfo>();
 
     public bool TryGetDestinationPosition(ActionType actionType, out Vector3 position)
     {

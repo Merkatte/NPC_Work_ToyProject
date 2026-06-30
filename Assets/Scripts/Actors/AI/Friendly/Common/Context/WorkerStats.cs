@@ -2,12 +2,8 @@ using UnityEngine;
 
 public class WorkerStats: ITickable
 {
-    private readonly float MIN_HUNGER_VAL = 0f;
-    private readonly float MAX_HUNGER_VAL = 100f;
-    private readonly float MIN_THIRST_VAL = 0f;
-    private readonly float MAX_THIRST_VAL = 100f;
-    private readonly float MIN_FATIGUE_VAL = 0f;
-    private readonly float MAX_FATIGUE_VAL = 100f;
+    private const float MinStatVal = 0f;
+    private const float MaxStatVal = 100f;
     
     private float _hunger;
     private float _thirst;
@@ -16,19 +12,19 @@ public class WorkerStats: ITickable
     public float Hunger
     {
         get => _hunger;
-        private set => _hunger = Mathf.Clamp(value, MIN_HUNGER_VAL, MAX_HUNGER_VAL);
+        private set => _hunger = Mathf.Clamp(value, MinStatVal, MaxStatVal);
     }
-    
+
     public float Thirst
     {
         get => _thirst;
-        private set => _thirst = Mathf.Clamp(value, MIN_THIRST_VAL, MAX_THIRST_VAL);
+        private set => _thirst = Mathf.Clamp(value, MinStatVal, MaxStatVal);
     }
 
     public float Fatigue
     {
         get => _fatigue;
-        private set => _fatigue = Mathf.Clamp(value, MIN_FATIGUE_VAL, MAX_FATIGUE_VAL);
+        private set => _fatigue = Mathf.Clamp(value, MinStatVal, MaxStatVal);
     }
 
     public WorkerStats(float hunger, float thirst, float fatigue)
