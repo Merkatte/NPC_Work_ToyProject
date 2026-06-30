@@ -97,6 +97,20 @@
 - Selectors may reference action sets, providers, enums, and context data when building a plan.
 - Selector dependencies should be visible in fields or setup code. Avoid hidden global lookup from selector logic.
 
+## UI Rules
+- Put shared UI scripts under `Assets/Scripts/UI` when they are scene-level UI infrastructure. Put feature-specific UI scripts under the owning feature folder when they are only meaningful for that feature.
+- A scene-level `UIManager` may own popup lookup, popup opening, top-popup closing, and the active popup stack for that scene.
+- `UIManager` should act as a UI router/window manager. It should not own domain rules such as recruitment affordability, candidate generation, worker spawning, inventory mutation, or selector behavior.
+- Every popup managed by `UIManager` must implement `IPopup`.
+- `IPopup` should expose `Open()` and `Close()` methods. Use `OpenPopup(...)` and `ClosePopup(...)` naming on manager-level APIs when the caller is addressing a popup by type.
+- Identify managed popups with a UI-layer enum such as `UIPopupType`. Enum values should describe popup identities, not domain actions.
+- Store active popups in stack/LIFO order so the most recently opened popup closes first.
+- Closing a popup through any path must keep the active popup stack synchronized. This includes ESC, a close button, a cancel button, clicking an overlay, or code-driven close requests.
+- Prefer routing popup close requests through `UIManager` when the popup is stack-managed. If a popup can close itself, it must notify `UIManager` or call the manager close API so stale active-stack entries are not left behind.
+- `CloseTopPopup()` should close only the current top popup. Closing a non-top popup should explicitly remove that popup from the active stack or be disallowed by policy.
+- UI scripts may read and call public feature APIs such as `RecruitmentManager.Candidates`, `CanRecruit`, and `TryRecruit`, but they must not directly mutate worker internals, action plans, selectors, context, movement, or stats.
+- Recruitment UI should depend on read-only candidate surfaces such as `IResidentCandidateView` for display data and call recruitment command APIs for actions.
+
 ## Enums
 - Enum access should be limited to the layers that actually make decisions with those enum values.
 - Keep enum usage away from lower-level execution scripts when an interface or plan data can express the dependency more clearly.
