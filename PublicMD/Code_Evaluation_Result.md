@@ -1,249 +1,132 @@
 # Code Evaluation Result
 
 ## Purpose
-
-This document records a lead-programmer review of the NPC_Work_2D worker/NPC implementation after the warehouse inventory slice (`IMP-008`). The review checks `PublicMD/CodeConvention.md`, `PublicMD/ProjectStructure.md`, the review workflow, all relevant C# scripts, and Unity scene/prefab wiring. Production code was not modified.
+Read-only lead-programmer review of the Unity worker/NPC code against `PublicMD/CodeConvention.md`, `PublicMD/ProjectStructure.md`, and the `reviewing-npc-work-code` workflow. Production code was not modified.
 
 ## Review Snapshot
-
-- Date: 2026-06-22
-- Scope: all `.cs` files under `Assets/Scripts` and `Assets/BehaviorGraph/CustomActionNode`, `Assets/Scenes/SampleScene.unity`, `Assets/Prefab/FarmerAI.prefab`, and the warehouse-related working-tree changes
-- Sources: current code convention, project structure, architecture, prior evaluation report, source code, asset metadata, scene/prefab YAML
-- Verification: `dotnet build Assembly-CSharp.csproj --no-restore` passed with 0 warnings and 0 errors; warehouse script GUID and scene references passed static checks
-- Limit: Unity Editor import, component deserialization, and Play Mode behavior were not executed
+- Date: 2026-06-30
+- Scope: All `.cs` files under `Assets/Scripts`, Behavior Graph bridge nodes under `Assets/BehaviorGraph/CustomActionNode`, `Assets/Scenes/SampleScene.unity`, `Assets/Prefab/FarmerAI.prefab`, `Assets/BehaviorGraph/FarmerGraph.asset`, and `Assets/Scripts/Actors/AI/Friendly/Common/Data/DefaultWorkerActionResultStatData.asset`.
+- Sources: `PublicMD/CodeConvention.md`, `PublicMD/ProjectStructure.md`, previous `PublicMD/Code_Evaluation_Result.md`, `.codex/skills/reviewing-npc-work-code/SKILL.md`, `.codex/skills/reviewing-npc-work-code/references/review-workflow.md`, code, scene, prefab, and data asset files listed above.
+- Verification: Ran `dotnet build Assembly-CSharp.csproj --no-restore` successfully with 0 warnings and 0 errors. Ran targeted `rg` checks for stale enums, destination types, repeated component lookup, debug logs, TODOs, selector/action ownership, serialized scene references, prefab component wiring, and project-file compile includes.
+- Workspace note: The working tree already contains unrelated modified and untracked files, including skill folders and project/document files. This report only updates `PublicMD/Code_Evaluation_Result.md`.
 
 ## Executive Summary
+The core worker architecture remains directionally sound. `WorkerAI` still owns plan lifecycle and ticking, selectors still build `WorkerActionPlan` instances, actions execute behavior through `WorkerActionContext`, and animation playback stays behind `IAnimPlayer`.
 
-The previous High issue—deposited wheat disappearing because no warehouse owned it—is substantially resolved. `WarehouseInventory` owns runtime quantities, `DepositWheatAction` removes only the quantity accepted by the destination, and `WorkerDefaultActionSelector` injects the external inventory without polluting `WorkerActionContext`. `WorkerAI` remains execution-only. Static scene wiring is internally consistent and the project builds cleanly.
+The main current risk is serialized scene wiring for the Guard role. `WorkerAIManager` maps both Default and Guard selector entries to the Farmer selector template, so selecting Guard would instantiate `FarmerActionSelector` instead of `GuardActionSelector`. The actual Guard template also has no destination provider, an empty enemy mask, and the worker prefab does not include `AttackPower`, so guard combat behavior is not currently runnable without additional wiring.
 
-One High behavior issue remains in the completed slice: when both worker carry and warehouse are full, the selector skips deposit and falls through to another `WorkAction`. The worker therefore continues working with a full carry, discards the zero accepted production result, and never enters the required identifiable wait or production-stop state. This contradicts `REQ-F-023` and the architecture's warehouse-rejection rule.
-
-The existing missing-destination ambiguity also remains. In the new deposit path it can allow a deposit action to run without moving when the warehouse destination mapping is absent. Documentation is now stale: `ProjectStructure.md` and parts of `ARCHITECTURE.md` still describe the removed `DepositAllWheat()` flow and claim that no warehouse inventory owner exists.
-
-No Critical issues found.
+The previous recruitment build-coverage finding is resolved: recruitment scripts now live under `Assets/Scripts/Systems/Recruitment`, are included in `Assembly-CSharp.csproj`, and the project builds. The recruitment payment/spawn transaction issue remains.
 
 ## Improvements Since Previous Review
-
-- Added `WarehouseInventory` as the runtime owner of warehouse quantities and capacity.
-- Added `IInventory` with add, remove, quantity, total-count, and capacity contracts.
-- Added `ItemType.Wheat` and connected the initial warehouse to the shared item-keyed inventory API.
-- Changed `DepositWheatAction` to add to the destination first and remove only the accepted quantity from carry.
-- Kept facility inventory out of `WorkerActionContext`; the selector injects it into the rented deposit action.
-- Added the `WarehouseInventory` component to `WarehouseObject` and wired `_warehouse` on the default selector template.
-- Preserved `WorkerAI`'s execution-only responsibility.
-- The previous warehouse-persistence High finding is resolved for the normal non-full path.
+- Recruitment files are now under the convention-approved `Assets/Scripts/Systems/Recruitment` folder instead of the old `Assets/Scripts/Recruitment` path used in the previous report.
+- `Assembly-CSharp.csproj` includes the recruitment scripts and Guard/Behavior Graph additions, and `dotnet build Assembly-CSharp.csproj --no-restore` passed with 0 warnings and 0 errors.
+- Worker behavior additions for guard/combat are placed in selectors, actions, context-side helper data, and combat/facility systems rather than being pushed into `WorkerAI`.
 
 ## Findings By Severity
 
 ### Critical
-
 None found.
 
 ### High
+#### Finding 1: Guard selector scene wiring points to the Farmer selector template
+- Severity: High
+- File: `Assets/Scenes/SampleScene.unity:947`
+- Evidence: `WorkerAIManager` has `_selectorType: 2` (Guard) at `Assets/Scenes/SampleScene.unity:949`, but `_selectorSource` points to `{fileID: 568873992}` at line 950. That fileID is the `FarmerActionSelector` component at lines 456-460. The actual `GuardActionSelector` component exists separately at lines 753-755.
+- Why it matters: `WorkerAIManager.TryCreateSelector` instantiates the serialized selector source and only checks that it implements `IActionSelector<WorkerActionContext, WorkerActionPlan>` (`Assets/Scripts/Actors/AI/Friendly/Common/WorkerAIManager.cs:149-170`). If `_initialSelectorType` is changed to Guard, the manager will create a Farmer selector and run farmer work/deposit behavior instead of guard patrol/combat behavior.
+- Recommendation: Change the Guard selector entry to reference the `GuardActionSelector` component (`fileID: 937587168`) or a dedicated Guard selector prefab/template. Add a scene validation pass or editor assertion that selector entry type and component type match.
 
-- **Warehouse-full selection falls back to work instead of wait/stop**
-  - Location: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerDefaultActionSelector.cs:47-56`; `Assets/Scripts/Actors/AI/Friendly/Farmer/Actions/WorkAction.cs:31`
-  - Evidence: deposit is selected only when `IsWheatFull && WarehouseHasSpace()`. If carry is full and the warehouse has no space, the branch is skipped and the selector eventually creates another Work plan. `WorkAction` ignores the accepted amount returned by `AddWheat`.
-  - Description: a full worker repeatedly performs work while its carry cannot accept more wheat. The newly produced amount is not represented, and there is no identifiable waiting or production-stopped state.
-  - Impact: violates `REQ-F-023`, `ARCHITECTURE.md:919`, and the M0 safe-failure exit criteria; the production loop appears active while producing no stored output.
-  - Recommended fix: make full carry a decision boundary regardless of warehouse space. If the warehouse cannot accept items, return an explicit wait/blocked plan or a throttled no-plan result with an observable reason. Do not select Work until carry space is available.
+#### Finding 2: Guard combat template is incomplete even if selected
+- Severity: High
+- Files: `Assets/Scenes/SampleScene.unity:756`, `Assets/Scenes/SampleScene.unity:757`, `Assets/Scenes/SampleScene.unity:759`, `Assets/Prefab/FarmerAI.prefab:139`
+- Evidence: The Guard template has `_actionSet: {fileID: 0}` and `_destinationProvider: {fileID: 0}` at scene lines 756-757, and `_enemyMask.m_Bits: 0` at lines 759-761. `GuardActionSelector.Awake()` can recover a same-object `WorkerActionSet` but only tries to find a same-object `DestinationProvider` (`GuardActionSelector.cs:35-39`), and `IWorkerActionSelectorSetup.Init` injects only the action set (`WorkerAIManager.cs:156-164`). `GuardActionSelector` resolves `_attackPower` with `GetComponentInParent<IAttackPower>()` (`GuardActionSelector.cs:41-44`), but `FarmerAI.prefab` contains only `WorkerAI` and `WorkerMovementStats` components at lines 139 and 151; no `AttackPower` or `Health` component is serialized on the worker prefab.
+- Why it matters: Once the Guard entry is corrected, needs recovery destinations will be unavailable, enemy scanning will never match anything with a zero mask, and attack plan creation will fail because `_attackPower` is null. The role will degrade to failed or inert plans instead of patrol/seek/attack behavior.
+- Recommendation: Wire the Guard template to the shared `DestinationProvider`, set a non-empty enemy layer mask, and add or inject an `AttackPower` component for guard-capable workers. If guards need different prefabs than farmers, represent that explicitly in `WorkerAIManager` or the recruitment/spawn composition boundary.
 
 ### Medium
+#### Finding 3: Recruitment payment is not transaction-safe when spawn fails
+- Severity: Medium
+- File: `Assets/Scripts/Systems/Recruitment/RecruitmentManager.cs:67`
+- Evidence: `TryRecruit` calls `_costPolicy.TryPay(candidate.RecruitCost)` at lines 67-68 before checking `_residentSpawner == null` at line 70 and before `_residentSpawner.TrySpawnResident(candidate)` at line 80. The comment at lines 50-54 also acknowledges the missing refund path.
+- Why it matters: The current `AlwaysAffordableCostPolicy` is non-mutating, but a real wallet-backed implementation can deduct gold and then fail to spawn. The candidate is retained, but payment state would already be mutated.
+- Recommendation: Redesign the cost policy before adding a wallet implementation. Use reserve/commit/rollback, a refund token, or a command-level transaction that validates spawn preconditions before committing payment.
 
-- **Missing destination is still treated as already at destination**
-  - Location: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerDefaultActionSelector.cs:101-113, 132-144, 148-162`
-  - Evidence: `TryGetMoveDestination` returns `false` for both missing provider/mapping and being within stopping distance. Callers create the target action directly whenever it returns `false`.
-  - Description: work, recovery, and deposit actions may execute in place when scene destination data is absent.
-  - Impact: configuration errors remain silent; the warehouse action can deposit remotely instead of failing plan construction.
-  - Recommended fix: return a three-state result such as Missing, AlreadyThere, or MoveRequired, and return rented actions when the required mapping is missing.
-
-- **Inventory change records/notifications are absent**
-  - Location: `Assets/Scripts/Facility/WarehouseInventory.cs`; `Assets/Scripts/Interface/IInventory.cs`
-  - Evidence: mutations update the dictionary and total count but produce no change record or notification.
-  - Description: the target flow in `ARCHITECTURE.md:138, 455, 982` requires inventory changes to be observable for UI/debug.
-  - Impact: the next UI/debug slice has no supported observation boundary and may be forced to poll concrete inventory state.
-  - Recommended fix: add a focused inventory change result/event containing item, accepted/removed quantity, and reason. Keep UI out of the inventory implementation.
-
-- **Project structure and architecture documentation are stale after IMP-008**
-  - Location: `PublicMD/ProjectStructure.md:406, 415, 677`; `PublicMD/ARCHITECTURE.md:141, 475`
-  - Evidence: the documents still say `DepositWheatAction` calls `DepositAllWheat()`, clears all carry, and that no warehouse runtime owner exists.
-  - Description: current ownership and transfer semantics are not reflected in the long-lived architecture guidance.
-  - Impact: subsequent Cook, merchant, and inventory work may be designed against obsolete behavior.
-  - Recommended fix: document `IInventory`, `WarehouseInventory`, partial acceptance, selector-to-action injection, and the current warehouse-full limitation.
-
-- **Shared item identity is placed in the worker namespace**
-  - Location: `Assets/Scripts/Enum/ItemType.cs`; consumers in `WarehouseInventory` and `IInventory`
-  - Evidence: `ItemType` is declared in `WorkerEnum`, while the architecture defines items as shared by facilities, actions, economy, merchant, and UI.
-  - Description: a settlement-wide inventory key is owned by the worker namespace.
-  - Impact: facility and economy domains must depend on a worker-specific namespace, creating dependency-direction drift as the item catalog grows.
-  - Recommended fix: move item identity to a neutral inventory/item domain namespace and location before Cook and merchant systems depend on it.
-
-- **`WorkerActionResultStatData` does not validate duplicate or missing entries**
-  - Location: `Assets/Scripts/Actors/AI/Friendly/Common/Data/WorkerActionResultStatData.cs:11-31`
-  - Evidence: the first duplicate silently wins and missing required entries only cause runtime action creation to fail.
-  - Impact: Inspector data errors can disable work or deposit behavior without an editor-time diagnosis.
-  - Recommended fix: add `OnValidate()` checks for duplicate keys and required registered action entries.
-
-- **Combat selector still has no in-range action or idle policy**
-  - Location: `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerCombatActionSelector.cs:30-49`
-  - Evidence: missing target and in-range target both return no plan; `WorkerAI.Update()` requests a plan again every frame.
-  - Impact: a combat worker can remain stuck while being polled each frame.
-  - Recommended fix: add an attack/idle plan or an explicit event/throttled selection policy before enabling this selector.
-
-- **`IActionSet<TKey>` still represents only a fraction of the actual action-set role**
-  - Location: `Assets/Scripts/Interface/IActionSet.cs`; `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerActionSet.cs`
-  - Evidence: consumers use concrete overloads for destinations, inventory injection, result lookup, and action return.
-  - Impact: the interface suggests replaceability that does not exist.
-  - Recommended fix: remove it until needed or define a contract covering the real rental/return responsibilities.
+#### Finding 4: Combat scanning performs component lookup in action ticks
+- Severity: Medium
+- Files: `Assets/Scripts/Actors/AI/Friendly/Common/Actions/SeekAction.cs:50`, `Assets/Scripts/Actors/AI/Friendly/Common/Actions/PatrolAction.cs:65`, `Assets/Scripts/Actors/AI/Friendly/Common/Combat/EnemyScanner.cs:41`
+- Evidence: `SeekAction.Tick()` and `PatrolAction.Tick()` call `EnemyScanner.TryFindNearest`, and `EnemyScanner` calls `col.GetComponent<IDamageable>()` for each collider returned by `Physics2D.OverlapCircle`.
+- Why it matters: `CodeConvention.md` says to avoid repeated `GetComponent` in tick methods. This is currently bounded by a 10-collider buffer, but patrol scans every action tick and can become a hot path as enemy counts grow.
+- Recommendation: Cache damageable targets on an enemy component, maintain a target registry, or introduce a small `DamageableCollider` bridge so scanning can avoid repeated interface component lookup in the action tick path.
 
 ### Low
+#### Finding 5: `DestinationProvider` lacks null-array safety
+- Severity: Low
+- File: `Assets/Scripts/Provider/DestinationProvider.cs:7`
+- Evidence: `_destinationInfos` is serialized but not initialized. Both lookup methods iterate `_destinationInfos.Length` at lines 11 and 28. A provider component with the field left unset can throw before returning a clean `false`.
+- Why it matters: Providers are scene-wired dependencies used by selectors. Their `Try...` methods should treat missing data as a valid runtime failure path, not an exception.
+- Recommendation: Initialize `_destinationInfos` to `Array.Empty<DestinationInfo>()` or guard `if (_destinationInfos == null)` in both lookup methods.
 
-- **Warehouse capacity has no editor/runtime validation**
-  - Location: `Assets/Scripts/Facility/WarehouseInventory.cs:7, 23-24`
-  - Evidence: `_capacity` can be negative; no `Min`, `OnValidate`, or runtime clamp is applied.
-  - Recommended fix: clamp capacity to a non-negative value and validate invariants.
+#### Finding 6: Worker debug logging is noisy for normal gameplay paths
+- Severity: Low
+- Files: `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAIManager.cs:40`, `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAIManager.cs:45`, `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAIManager.cs:67`, `Assets/Scripts/Actors/AI/Friendly/Common/Actions/MoveAction.cs:28`
+- Evidence: Worker spawn and movement paths emit plain `Debug.Log` messages during normal operation.
+- Why it matters: These are expected runtime paths and can flood the console once multiple workers spawn or move, making real warnings harder to see.
+- Recommendation: Remove normal-path logs, downgrade to editor-only diagnostics, or gate them behind a serialized debug flag. Keep `Debug.LogWarning` for missing required configuration.
 
-- **Destroyed Unity inventory references are not safely detected through the interface field**
-  - Location: `Assets/Scripts/Actors/AI/Friendly/Farmer/Actions/DepositWheatAction.cs:33, 51`
-  - Evidence: `targetInventory` is typed as `IInventory`; `targetInventory == null` does not provide Unity fake-null semantics if the underlying `WarehouseInventory` is destroyed after plan creation.
-  - Recommended fix: define an inventory availability contract or perform an explicit Unity-object validity check for Unity-backed inventories.
+#### Finding 7: Stale enum/API surface remains
+- Severity: Low
+- Files: `Assets/Scripts/Enum/ActionType.cs:9`, `Assets/Scripts/Enum/DestinationType.cs:5`, `Assets/Scripts/Actors/AI/Friendly/Common/Context/WorkerMover.cs:56`
+- Evidence: `ActionType.Sleep` remains even though current need logic uses `Rest`; `DestinationType` exists while current destination lookup uses `ActionType`; `WorkerMover.MoveTo` is present but no current caller was found in `Assets/Scripts`.
+- Why it matters: Stale API surface makes selector/action ownership harder to infer and can mislead future implementation work.
+- Recommendation: Remove unused enum values/types and unused mover methods once no scene serialization or pending branch depends on them.
 
-- **New and existing private fields do not follow the project field convention**
-  - Location: `DepositWheatAction` (`resultStatEntry`, `targetInventory`, `timer`, `failed`), `WorkerAI`, `WorkerAIManager`, `WorkerCarryStorage`, `WorkerMover`, `MoveAction`, `MoveAnim`, `WorkAnim`
-  - Evidence: private fields use unprefixed camelCase while `CodeConvention.md` requires `_camelCase` for private fields.
-  - Recommended fix: apply a focused naming cleanup; use `[FormerlySerializedAs]` for serialized fields.
-
-- **Normal-flow logs and stale comments remain**
-  - Location: `WorkerAIManager`, `MoveAction`, `WorkerAI`, `WorkerActionContext`
-  - Evidence: spawn/move logs run during normal behavior; commented-out `SetAction` and owner code remain.
-  - Recommended fix: remove or gate routine logs and delete obsolete commented code.
-
-- **Destination provider validation/style issues remain**
-  - Location: `Assets/Scripts/Provider/DestinationProvider.cs`
-  - Evidence: `_destinationInfos.Length` has no null guard; `DestinationInfo` exposes public mutable fields; Unity references use `== null`.
-  - Recommended fix: guard the array, use private serialized fields with read-only properties, and add duplicate/missing mapping validation.
-
-- **Stale enums/usings and unsupported values remain**
-  - Location: `DestinationType`, `ActionType.Sleep`, `TickType.Custom`, unused `UnityEngine` imports
-  - Recommended fix: remove or document unused values and reject unsupported tick types explicitly.
-
-- **`WorkerActionResultStatData` naming no longer matches its contents**
-  - Location: `WorkerActionResultStatData`, `WorkerActionResultStatEntry`
-  - Evidence: entries contain `_wheatDelta`, which is an item reward rather than only stat data.
-  - Recommended fix: rename to `WorkerActionResultData`/`WorkerActionResultEntry` before more item outputs are added.
+#### Finding 8: Older style constants and comments remain in core worker files
+- Severity: Low
+- Files: `Assets/Scripts/Actors/AI/Friendly/Common/Context/WorkerStats.cs:5`, `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAI.cs:18`, `Assets/Scripts/Actors/AI/Friendly/Common/Actions/SeekAction.cs:36`
+- Evidence: `WorkerStats` uses readonly instance fields named `MIN_HUNGER_VAL` through `MAX_FATIGUE_VAL` instead of `const`/`static readonly` project style. Several comments in worker/combat files render as corrupted mojibake in the current checkout, while project docs render Korean correctly.
+- Why it matters: This is not a runtime bug, but it reduces maintainability and violates the convention preference for clear comments and fixed-value constants.
+- Recommendation: Convert fixed stat bounds to `const` or `static readonly` with conventional names, and either restore comments with a consistent UTF-8 encoding or remove comments that no longer add readable context.
 
 ## Findings By File
-
-### `Assets/Scripts/Facility/WarehouseInventory.cs`
-
-- Correctly owns facility inventory quantities and total capacity.
-- `TryAdd` supports partial acceptance and maintains the total-count invariant for current single-threaded use.
-- Needs capacity validation and an observation/change-record boundary.
-- Zero-count dictionary entries after full removal are harmless but may be cleaned up if item enumeration is later exposed.
-
-### `Assets/Scripts/Interface/IInventory.cs`
-
-- The interface has a real multi-domain role and matches the architecture's add/remove/read boundary.
-- It currently exposes no mutation reason or change observation needed by UI/debug.
-
-### `Assets/Scripts/Enum/ItemType.cs`
-
-- The enum is minimal and suitable for the first slice.
-- `WorkerEnum` is the wrong long-term ownership namespace for a facility/economy-wide item identity.
-
-### `Assets/Scripts/Actors/AI/Friendly/Farmer/Actions/DepositWheatAction.cs`
-
-- Correctly performs destination-first partial transfer and removes only accepted carry.
-- Correctly fails when accepted quantity is zero, preserving carry.
-- Its external inventory is cleared when the action is returned to the pool.
-- Interface-backed Unity object validity and private-field naming need cleanup.
-
-### `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerActionSet.cs`
-
-- Inventory injection mirrors the existing destination-injection pattern and returns mismatched rented actions safely.
-- `ResetAction` clears mutable per-run deposit state before pooling.
-- Concrete action casts are pragmatic but show why `IActionSet<TKey>` does not represent the actual contract.
-
-### `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerDefaultActionSelector.cs`
-
-- Correctly keeps warehouse availability and deposit intent in the decision layer.
-- Correctly avoids putting the facility inventory in worker context.
-- Warehouse-full behavior falls through to work and must be corrected before M0 is considered complete.
-- Missing destination and already-arrived states remain conflated.
-
-### `Assets/Scripts/Actors/AI/Friendly/Farmer/Actions/WorkAction.cs`
-
-- Execution responsibility remains clean and data-driven.
-- Ignoring the accepted quantity from `AddWheat` becomes observable when a selector incorrectly permits work with full carry.
-
-### `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAI.cs`
-
-- Remains execution-only and has no inventory/facility dependency.
-- Existing naming and stale-comment cleanup remains.
-
-### `Assets/Scripts/Actors/AI/Friendly/Farmer/WorkerAIManager.cs`
-
-- Selector composition and per-worker context construction remain structurally sound.
-- Existing normal-flow logging and field naming remain cleanup items.
-
-### `Assets/Scripts/Actors/AI/Friendly/Cook/CookActionSelector.cs`
-
-- Correctly remains a no-plan boundary rather than inventing cooking ownership prematurely.
-- Do not extend it until shared item/inventory ownership and current M0 failures are resolved.
-
-### `Assets/Scripts/Animation/*`
-
-- Shared animation definitions remain stateless; active Tween state remains per actor.
-- VisualRoot prefab wiring remains correct by static YAML inspection.
-- Private readonly animation parameter names still violate the current convention.
-
-### `Assets/Scripts/Provider/DestinationProvider.cs`
-
-- Role is appropriately limited to lookup.
-- Missing array/mapping validation and public mutable nested fields remain.
-
-### `Assets/BehaviorGraph/CustomActionNode/*`
-
-- Nodes remain focused bridges through `WorkerAI` and do not acquire selector/action-set dependencies.
-
-### `Assets/Scenes/SampleScene.unity`
-
-- `_warehouse` on `WorkerDefaultActionSelector` references fileID `1903621705`.
-- fileID `1903621705` is attached to `WarehouseObject` and references the `WarehouseInventory` script GUID declared in its `.meta` file.
-- DestinationProvider still maps deposit movement to `WarehousePoint` by the existing scene data.
-- Unity Editor deserialization and Play Mode remain unverified.
-
-### `Assets/Prefab/FarmerAI.prefab`
-
-- Worker root contains `WorkerAI` and `WorkerMovementStats`; the child `VisualRoot` owns the `SpriteRenderer`.
-- No selector-side action set or facility inventory leaked onto the worker prefab.
+- `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAI.cs`: No ownership drift found. It still owns plan lifecycle and action ticking. Low cleanup: stale commented-out `SetAction` and corrupted comments.
+- `Assets/Scripts/Actors/AI/Friendly/Common/WorkerAIManager.cs`: Selector instantiation role is appropriate. Scene data currently misuses its selector entry contract for Guard. Low cleanup: normal-path `Debug.Log` noise.
+- `Assets/Scripts/Actors/AI/Friendly/Common/WorkerActionPlan.cs`: No issue found. It remains a small queued runtime instruction object.
+- `Assets/Scripts/Actors/AI/Friendly/Common/WorkerActionSet.cs`: No issue found in ownership. It owns pools/action creation and keeps actions out of `WorkerAI`.
+- `Assets/Scripts/Actors/AI/Friendly/Common/Actions/*.cs`: Behavior remains in actions. Medium issue in scan-dependent actions due repeated component lookup through `EnemyScanner`. Low cleanup in `MoveAction` logging.
+- `Assets/Scripts/Actors/AI/Friendly/Farmer/FarmerActionSelector.cs`: No current issue found. It builds plans and does not execute action behavior.
+- `Assets/Scripts/Actors/AI/Friendly/Guard/GuardActionSelector.cs`: Code is structurally in the correct selector layer, but scene/prefab wiring currently prevents the role from working.
+- `Assets/Scripts/Actors/AI/Friendly/Cook/CookActionSelector.cs`: No issue found for a placeholder boundary.
+- `Assets/Scripts/Actors/AI/Friendly/Common/Context/*.cs`: Responsibilities are mostly clean. Low cleanup in `WorkerStats` constants and unused `WorkerMover.MoveTo`.
+- `Assets/Scripts/Actors/AI/Friendly/Common/Data/*.cs`: No issue found. Data asset shape remains single-purpose for action result tuning.
+- `Assets/Scripts/Actors/AI/Friendly/Common/Combat/*.cs`: `CombatTargetHolder` and `PatrolParams` are simple selector/action handoff types. `EnemyScanner` has the repeated component lookup issue.
+- `Assets/Scripts/Animation/**/*.cs`: No issue found. `IAnim` definitions are stateless and `ActorAnimationController` owns per-worker tween state.
+- `Assets/Scripts/Provider/DestinationProvider.cs`: Low null-array safety issue. Current scene references are populated for farmer needs/work/deposit and seek, but the component should fail cleanly when not configured.
+- `Assets/Scripts/Systems/Combat/*.cs`: `Health` and `AttackPower` are placed in a domain system folder. Scene/prefab wiring does not yet attach `AttackPower` to guard workers.
+- `Assets/Scripts/Systems/Facility/*.cs`: No direct issue found. `WarehouseInventory` is a clear facility inventory component.
+- `Assets/Scripts/Systems/Recruitment/*.cs`: Medium transaction issue remains in `RecruitmentManager.TryRecruit`. Folder placement and compile coverage are now correct.
+- `Assets/Scripts/Interface/*.cs` and `Assets/Scripts/Enum/*.cs`: Low stale enum/API issue. Interfaces otherwise match current shared-domain contracts.
+- `Assets/Scripts/Manager/TickManager.cs`: No runtime issue found in isolation. It is currently not integrated with worker stats, consistent with `ProjectStructure.md` known notes.
+- `Assets/BehaviorGraph/CustomActionNode/*.cs`: No ownership issue found. Nodes remain thin bridges to `WorkerAI`.
+- `Assets/Scenes/SampleScene.unity`: High Guard selector wiring issue and incomplete Guard template wiring.
+- `Assets/Prefab/FarmerAI.prefab`: Suitable for farmer movement/action execution, but not currently guard-combat capable because it lacks an `AttackPower` component.
 
 ## Cross-Cutting Findings
-
-- The new inventory boundary is directionally correct, but warehouse rejection lacks a defined selector state.
-- Static scene wiring is consistent, but hand-edited YAML cannot replace Unity Editor import and Play Mode verification.
-- Long-lived structure documents are behind the implementation and currently contradict the new transfer semantics.
-- Shared inventory/item concepts need a neutral domain before Cook, merchant, and UI systems depend on them.
-- Field naming drift remains widespread but is lower priority than runtime safe-failure behavior.
+- Scene/prefab wiring needs the same review standard as C# for selector roles. The code can compile and still instantiate the wrong selector behavior because selector entries are plain `MonoBehaviour` references.
+- Guard combat is partially implemented in code but not composition-ready. Role selection, attack capability, target layer mask, and need destinations must be validated together.
+- Several older comments are unreadable in the current checkout. Since comments are supposed to explain non-obvious behavior, unreadable comments should be treated as stale code-adjacent maintenance debt.
 
 ## Positive Notes
-
-- `WorkerAI` remains free of warehouse, item, and action-set details.
-- The destination inventory is mutated before carry is reduced, preventing loss on partial or rejected transfer.
-- `WorkerActionSet` clears injected external references when pooled actions are returned.
-- `WarehouseInventory` has one clear state-ownership responsibility.
-- Selector, action, inventory, and carry responsibilities remain distinct.
-- Scene and prefab references are internally consistent in YAML.
-- No duplicate asset GUIDs were found.
-- Command-line build passes with 0 warnings and 0 errors.
+- `WorkerAI` remains execution-focused and has not absorbed selector priorities, movement math, animation lookup, or action implementation details.
+- `WorkerActionSet` centralizes action construction and return/reset handling, including parameterized Move/Deposit/Seek/Patrol/Attack action rental.
+- Farmer deposit now routes through `IInventory`, so wheat deposit is no longer just clearing carry state without facility acceptance.
+- Animation ownership is clean: actions request animation through context, and only `ActorAnimationController` owns active tweens.
+- Recruitment is now correctly scoped under `Systems/Recruitment` and compiles in the project.
 
 ## Recommended Next Actions
+1. Fix `SampleScene.unity` selector entries so Guard references `GuardActionSelector`, then wire Guard `_destinationProvider`, `_enemyMask`, and worker attack capability.
+2. Add an editor/runtime validation path for `WorkerAIManager` selector entries: expected role type, non-null selector source, required `WorkerActionSet`, and role-specific dependencies.
+3. Redesign recruitment payment around reserve/commit/rollback before connecting a real wallet.
+4. Remove or gate normal-path worker debug logs.
+5. Clean stale enum/API/comment debt after confirming no serialized references depend on it.
 
-1. **High:** implement an explicit warehouse-full wait/blocked policy so a full-carry worker cannot select Work.
-2. **Medium:** separate destination Missing, AlreadyThere, and MoveRequired results; fail plan construction on missing mappings.
-3. **Verification:** open the project in Unity, confirm the warehouse component/reference survives import, and run the full Move → Work → Carry → Deposit loop including partial/full warehouse cases.
-4. **Medium:** update `ProjectStructure.md` and stale architecture current-state notes for `IInventory`, `WarehouseInventory`, and partial transfer.
-5. **Medium:** add inventory change observation for UI/debug and move `ItemType` to a neutral inventory/item domain.
-6. **Medium:** add validation for warehouse capacity, destination mappings, and action-result entries.
-7. **Medium:** complete or keep the combat selector disabled until an in-range policy exists.
-8. **Low:** clean field naming, routine logs, stale comments, unused enums/usings, and misleading action-result data names.
+## Final Verdict
+Not approved for Guard/combat role usage yet because scene/prefab wiring currently instantiates the wrong selector and leaves the actual Guard template incomplete. The farmer worker flow and core action architecture are in acceptable shape for the current prototype, and the project compiles successfully.
