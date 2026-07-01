@@ -79,6 +79,7 @@ namespace Recruitment
                     break;
 
                 RecruitmentCandidateSlot slot = Instantiate(_slotPrefab, _slotParent);
+                slot.gameObject.SetActive(true);
                 slot.Bind(candidates[i], RequestRecruit);
                 _activeSlots.Add(slot);
             }

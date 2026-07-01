@@ -28,3 +28,8 @@ Thumbs.db
 
 # Local game planning document
 /PublicMD/Game_Plan.md
+
+# Local TextMesh Pro essentials.
+# UI uses TMP; import TMP Essentials locally instead of committing generated TMP assets.
+/Assets/TextMesh Pro.meta
+/Assets/TextMesh Pro/
